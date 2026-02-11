@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  username      String    @unique
+  password      String
+  fullName      String?
+  avatar        String?
+  gameName      String?
+  gameId        String?
+  role          Role      @default(USER)
+  status        UserStatus @default(ACTIVE)
+  isVerified    Boolean   @default(false)
+  verificationToken String?
+  resetToken    String?
+  resetTokenExpiry DateTime?
+  balance       Float     @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  profile       Profile?
+  teams         TeamMember[]
+  ownedTeams    Team[]    @relation("TeamOwner")
+  matches       MatchPlayer[]
+  tournaments   TournamentRegistration[]
+  transactions  Transaction[]
+  notifications Notification[]
+  
+  @@index([email])
+  @@index([username])
+  @@index([gameId])
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum Role {
+  USER
+  ADMIN
+  MODERATOR
+}
+
+model Profile {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId        String?
+  gameUsername  String?
+  rank          String?
+  bio           String?
+  phone         String?
+  country       String?
+  discordId     String?
+  stats         Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Team {
+  id            String    @id @default(cuid())
+  name          String
+  tag           String    @unique
+  logo          String?
+  description   String?
+  ownerId       String
+  owner         User      @relation("TeamOwner", fields: [ownerId], references: [id])
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  members       TeamMember[]
+  matches       Match[]
+  tournaments   TournamentRegistration[]
+  
+  @@index([ownerId])
+  @@index([tag])
+}
+
+model TeamMember {
+  id            String    @id @default(cuid())
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role          TeamRole  @default(MEMBER)
+  joinedAt      DateTime  @default(now())
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+enum TeamRole {
+  OWNER
+  CAPTAIN
+  MEMBER
+}
+
+model Match {
+  id            String    @id @default(cuid())
+  title         String
+  description   String?
+  teamId        String?
+  team          Team?     @relation(fields: [teamId], references: [id])
+  opponentName  String
+  matchType     MatchType
+  status        MatchStatus @default(SCHEDULED)
+  scheduledAt   DateTime
+  startedAt     DateTime?
+  endedAt       DateTime?
+  result        String?
+  score         String?
+  roomId        String?
+  roomPassword  String?
+  scrimConfig   Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  players       MatchPlayer[]
+  
+  @@index([teamId])
+  @@index([status])
+}
+
+enum MatchType {
+  SCRIM
+  TOURNAMENT
+  PRACTICE
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  COMPLETED
+  CANCELLED
+}
+
+model MatchPlayer {
+  id            String    @id @default(cuid())
+  matchId       String
+  match         Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  kills         Int       @default(0)
+  deaths        Int       @default(0)
+  assists       Int       @default(0)
+  damage        Int       @default(0)
+  
+  @@unique([matchId, userId])
+  @@index([matchId])
+  @@index([userId])
+}
+
+model Tournament {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?
+  banner        String?
+  prizePool     Float?
+  entryFee      Float     @default(0)
+  maxTeams      Int
+  format        String
+  rules         String?
+  status        TournamentStatus @default(UPCOMING)
+  registrationStart DateTime
+  registrationEnd   DateTime
+  startDate     DateTime
+  endDate       DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  registrations TournamentRegistration[]
+  
+  @@index([status])
+}
+
+enum TournamentStatus {
+  UPCOMING
+  REGISTRATION_OPEN
+  REGISTRATION_CLOSED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model TournamentRegistration {
+  id            String    @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id])
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  status        RegistrationStatus @default(PENDING)
+  paymentStatus PaymentStatus @default(PENDING)
+  registeredAt  DateTime  @default(now())
+  
+  @@unique([tournamentId, teamId])
+  @@index([tournamentId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Transaction {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  type          TransactionType
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  description   String?
+  reference     String?
+  receiptUrl    String?
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([status])
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TOURNAMENT_FEE
+  PRIZE_WINNING
+  REFUND
+}
+
+model Notification {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  message       String
+  type          NotificationType
+  isRead        Boolean   @default(false)
+  link          String?
+  createdAt     DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([isRead])
+}
+
+enum NotificationType {
+  MATCH
+  TOURNAMENT
+  TEAM
+  PAYMENT
+  SYSTEM
+}
+
+model PaymentMethod {
+  id            String    @id @default(cuid())
+  name          String
+  type          PaymentMethodType
+  accountNumber String?
+  accountName   String?
+  upiId         String?
+  qrCodeUrl     String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([isActive])
+}
+
+enum PaymentMethodType {
+  UPI
+  BANK
+  WALLET
+}
