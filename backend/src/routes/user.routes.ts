@@ -58,6 +58,8 @@ router.get('/:id', authenticate, async (req: any, res) => {
         username: true,
         email: true,
         avatar: true,
+        gameName: true,
+        gameId: true,
         role: true,
         createdAt: true,
         profile: true,
@@ -69,6 +71,9 @@ router.get('/:id', authenticate, async (req: any, res) => {
                 name: true,
                 tag: true,
                 logo: true,
+                _count: {
+                  select: { members: true }
+                }
               },
             },
           },
@@ -97,10 +102,69 @@ router.get('/:id', authenticate, async (req: any, res) => {
   }
 });
 
+// Update specific user's profile (only if it's the current user)
+router.put('/:id/profile', authenticate, async (req: any, res) => {
+  try {
+    const userId = req.params.id;
+    
+    // Check if user is updating their own profile
+    if (req.user.id !== userId) {
+      return res.status(403).json({ error: 'You can only update your own profile' });
+    }
+
+    const { gameName, gameId, avatar, gameUsername, rank, bio, phone, country, discordId, instagramHandle } = req.body;
+
+    // Update user table fields (gameName, gameId, avatar)
+    const updateUserData: any = {};
+    if (gameName !== undefined) updateUserData.gameName = gameName;
+    if (gameId !== undefined) updateUserData.gameId = gameId;
+    if (avatar !== undefined) updateUserData.avatar = avatar;
+
+    if (Object.keys(updateUserData).length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: updateUserData,
+      });
+    }
+
+    // Update profile table fields if provided
+    const profileData: any = {};
+    if (gameUsername !== undefined) profileData.gameUsername = gameUsername;
+    if (rank !== undefined) profileData.rank = rank;
+    if (bio !== undefined) profileData.bio = bio;
+    if (phone !== undefined) profileData.phone = phone;
+    if (country !== undefined) profileData.country = country;
+    if (discordId !== undefined) profileData.discordId = discordId;
+    if (instagramHandle !== undefined) profileData.instagramHandle = instagramHandle;
+
+    if (Object.keys(profileData).length > 0) {
+      await prisma.profile.upsert({
+        where: { userId },
+        update: profileData,
+        create: {
+          userId,
+          ...profileData,
+        },
+      });
+    }
+
+    // Return updated user
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: { profile: true },
+    });
+
+    res.json(user);
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Update profile
 router.put('/profile', authenticate, async (req: any, res) => {
   try {
-    const { gameName, gameId, avatar, gameUsername, rank, bio, phone, country, discordId } = req.body;
+    const { gameName, gameId, avatar, gameUsername, rank, bio, phone, country, discordId, instagramHandle } = req.body;
 
     // Update user table fields (gameName, gameId, avatar)
     const updateUserData: any = {};
@@ -116,10 +180,10 @@ router.put('/profile', authenticate, async (req: any, res) => {
     }
 
     // Update profile table fields if provided
-    if (gameUsername || rank || bio || phone || country || discordId) {
+    if (gameUsername || rank || bio || phone || country || discordId || instagramHandle) {
       await prisma.profile.upsert({
         where: { userId: req.user.id },
-        update: { gameUsername, rank, bio, phone, country, discordId },
+        update: { gameUsername, rank, bio, phone, country, discordId, instagramHandle },
         create: {
           userId: req.user.id,
           gameUsername,
@@ -128,6 +192,7 @@ router.put('/profile', authenticate, async (req: any, res) => {
           phone,
           country,
           discordId,
+          instagramHandle,
         },
       });
     }

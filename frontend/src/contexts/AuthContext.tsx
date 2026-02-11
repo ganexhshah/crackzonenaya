@@ -8,6 +8,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
+  googleLogin: (credential: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -54,6 +55,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push('/dashboard');
   };
 
+  const googleLogin = async (credential: string) => {
+    const response = await authService.googleLogin(credential);
+    setUser(response.user);
+    
+    // Check if new user or user without profile
+    if (response.isNewUser || !response.hasProfile) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('isFirstTimeUser', 'true');
+      }
+      router.push('/profile/setup');
+    } else {
+      router.push('/dashboard');
+    }
+  };
+
   const register = async (data: RegisterData) => {
     const response = await authService.register(data);
     setUser(response.user);
@@ -91,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, updateUserAvatar }}>
+    <AuthContext.Provider value={{ user, loading, login, googleLogin, register, logout, refreshUser, updateUserAvatar }}>
       {children}
     </AuthContext.Provider>
   );

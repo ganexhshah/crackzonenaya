@@ -169,8 +169,8 @@ export function MobileHeader() {
           </div>
         </div>
 
-        {/* Right: Notifications & Search */}
-        <div className="flex items-center gap-2">
+        {/* Right: Notifications, Search & Profile */}
+        <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon">
             <Search className="h-5 w-5" />
           </Button>
@@ -217,6 +217,46 @@ export function MobileHeader() {
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-center justify-center">
                 View all notifications
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Profile Avatar */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                <Avatar className="w-8 h-8">
+                  <AvatarImage src={user?.avatar || ""} alt={user?.username || "User"} />
+                  <AvatarFallback className="bg-gradient-to-br from-blue-400 to-indigo-500 text-white text-xs">
+                    {getInitials(user?.username)}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>
+                <div className="flex flex-col space-y-1">
+                  <p className="text-sm font-medium">{user?.username || "Player"}</p>
+                  <p className="text-xs text-muted-foreground truncate">{user?.email || ""}</p>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href={user?.id ? `/dashboard/profile/${user.id}` : "/profile/setup"} className="cursor-pointer">
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/settings" className="cursor-pointer">
+                  <Settings className="mr-2 h-4 w-4" />
+                  <span>Settings</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => logout()} className="text-destructive cursor-pointer">
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Logout</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

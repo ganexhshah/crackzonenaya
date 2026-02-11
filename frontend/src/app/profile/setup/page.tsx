@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Upload, User, Gamepad2, Camera, CheckCircle2 } from "lucide-react";
+import { Loader2, Upload, User, Gamepad2, Camera, CheckCircle2, Clipboard } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -82,6 +82,21 @@ export default function ProfileSetupPage() {
         setErrors({ ...errors, image: "" });
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePasteUID = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      const cleanedUID = text.replace(/\D/g, '').slice(0, 10);
+      if (cleanedUID) {
+        setFormData({ ...formData, uid: cleanedUID });
+        toast.success('UID pasted successfully!');
+      } else {
+        toast.error('No valid UID found in clipboard');
+      }
+    } catch (error) {
+      toast.error('Failed to paste from clipboard');
     }
   };
 
@@ -177,43 +192,43 @@ export default function ProfileSetupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 p-4 sm:p-6 md:p-8">
+      <Card className="w-full max-w-md shadow-xl">
+        <CardHeader className="space-y-1 px-4 sm:px-6">
           {showWelcome && (
             <Alert className="mb-4 border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-800">
               <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-              <AlertDescription className="text-green-800 dark:text-green-200">
+              <AlertDescription className="text-green-800 dark:text-green-200 text-sm">
                 <strong>Welcome aboard!</strong> Your account has been created successfully.
               </AlertDescription>
             </Alert>
           )}
-          <CardTitle className="text-2xl font-bold text-center">Setup Your Gaming Profile</CardTitle>
-          <CardDescription className="text-center">
+          <CardTitle className="text-xl sm:text-2xl font-bold text-center">Setup Your Gaming Profile</CardTitle>
+          <CardDescription className="text-center text-sm">
             Complete your profile to get started
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+        <CardContent className="px-4 sm:px-6">
+          <form onSubmit={handleSubmit} className="space-y-5 sm:space-y-6">
             {/* Profile Picture Upload */}
-            <div className="flex flex-col items-center space-y-4">
+            <div className="flex flex-col items-center space-y-3 sm:space-y-4">
               <div className="relative">
-                <Avatar className="w-32 h-32 border-4 border-blue-100 dark:border-blue-900">
+                <Avatar className="w-24 h-24 sm:w-32 sm:h-32 border-4 border-blue-100 dark:border-blue-900">
                   <AvatarImage src={profileImage} alt="Profile" />
-                  <AvatarFallback className="bg-gradient-to-br from-blue-400 to-indigo-500 text-white text-3xl">
-                    <User className="w-16 h-16" />
+                  <AvatarFallback className="bg-linear-to-br from-blue-400 to-indigo-500 text-white text-2xl sm:text-3xl">
+                    <User className="w-12 h-12 sm:w-16 sm:h-16" />
                   </AvatarFallback>
                 </Avatar>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-3 shadow-lg transition-colors"
+                  className="absolute bottom-0 right-0 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2 sm:p-3 shadow-lg transition-colors"
                   disabled={uploadingImage}
                 >
                   {uploadingImage ? (
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
                   ) : (
-                    <Camera className="w-5 h-5" />
+                    <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
                   )}
                 </button>
               </div>
@@ -232,8 +247,9 @@ export default function ProfileSetupPage() {
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingImage}
+                  className="text-xs sm:text-sm"
                 >
-                  <Upload className="w-4 h-4 mr-2" />
+                  <Upload className="w-3 h-3 sm:w-4 sm:h-4 mr-2" />
                   Upload Profile Picture
                 </Button>
                 <p className="text-xs text-gray-500 mt-2">
@@ -247,14 +263,14 @@ export default function ProfileSetupPage() {
 
             {/* In-Game Name */}
             <div className="space-y-2">
-              <Label htmlFor="ign">In-Game Name (IGN) *</Label>
+              <Label htmlFor="ign" className="text-sm sm:text-base">In-Game Name (IGN) *</Label>
               <div className="relative">
                 <Gamepad2 className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                 <Input
                   id="ign"
                   type="text"
                   placeholder="Your Free Fire IGN"
-                  className="pl-10"
+                  className="pl-10 text-sm sm:text-base"
                   value={formData.ign}
                   onChange={(e) => setFormData({ ...formData, ign: e.target.value })}
                   required
@@ -267,19 +283,30 @@ export default function ProfileSetupPage() {
 
             {/* Free Fire UID */}
             <div className="space-y-2">
-              <Label htmlFor="uid">Free Fire UID (10 digits) *</Label>
-              <Input
-                id="uid"
-                type="text"
-                placeholder="Enter your 10-digit UID"
-                value={formData.uid}
-                onChange={(e) => {
-                  const value = e.target.value.replace(/\D/g, '').slice(0, 10);
-                  setFormData({ ...formData, uid: value });
-                }}
-                maxLength={10}
-                required
-              />
+              <Label htmlFor="uid" className="text-sm sm:text-base">Free Fire UID (10 digits) *</Label>
+              <div className="relative">
+                <Input
+                  id="uid"
+                  type="text"
+                  placeholder="Enter your 10-digit UID"
+                  className="pr-12 text-sm sm:text-base"
+                  value={formData.uid}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 10);
+                    setFormData({ ...formData, uid: value });
+                  }}
+                  maxLength={10}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={handlePasteUID}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors"
+                  title="Paste UID from clipboard"
+                >
+                  <Clipboard className="w-4 h-4 text-gray-500 hover:text-blue-600" />
+                </button>
+              </div>
               <p className="text-xs text-gray-500">
                 Your UID is a 10-digit number found in your Free Fire profile
               </p>
@@ -288,10 +315,10 @@ export default function ProfileSetupPage() {
               )}
             </div>
 
-            <Alert>
-              <AlertDescription className="text-sm">
-                <strong>How to find your UID:</strong>
-                <ol className="list-decimal list-inside mt-2 space-y-1">
+            <Alert className="text-sm">
+              <AlertDescription>
+                <strong className="text-sm">How to find your UID:</strong>
+                <ol className="list-decimal list-inside mt-2 space-y-1 text-xs sm:text-sm">
                   <li>Open Free Fire game</li>
                   <li>Tap on your profile icon</li>
                   <li>Your 10-digit UID is displayed below your name</li>
@@ -300,7 +327,7 @@ export default function ProfileSetupPage() {
             </Alert>
 
             {/* Submit Button */}
-            <Button type="submit" className="w-full" disabled={isLoading || uploadingImage}>
+            <Button type="submit" className="w-full text-sm sm:text-base" disabled={isLoading || uploadingImage}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

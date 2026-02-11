@@ -11,7 +11,7 @@ model User {
   id            String    @id @default(cuid())
   email         String    @unique
   username      String    @unique
-  password      String
+  password      String?
   fullName      String?
   avatar        String?
   gameName      String?
@@ -23,6 +23,8 @@ model User {
   resetToken    String?
   resetTokenExpiry DateTime?
   balance       Float     @default(0)
+  googleId      String?   @unique
+  provider      AuthProvider @default(LOCAL)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
@@ -37,6 +39,13 @@ model User {
   @@index([email])
   @@index([username])
   @@index([gameId])
+  @@index([googleId])
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+  FACEBOOK
 }
 
 enum UserStatus {
@@ -62,6 +71,7 @@ model Profile {
   phone         String?
   country       String?
   discordId     String?
+  instagramHandle String?
   stats         Json?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -76,15 +86,66 @@ model Team {
   ownerId       String
   owner         User      @relation("TeamOwner", fields: [ownerId], references: [id])
   isActive      Boolean   @default(true)
+  balance       Float     @default(0)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
   members       TeamMember[]
   matches       Match[]
   tournaments   TournamentRegistration[]
+  transactions  TeamTransaction[]
+  moneyRequests TeamMoneyRequest[]
   
   @@index([ownerId])
   @@index([tag])
+}
+
+model TeamTransaction {
+  id            String    @id @default(cuid())
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String?
+  type          TeamTransactionType
+  amount        Float
+  description   String?
+  reference     String?
+  createdAt     DateTime  @default(now())
+  
+  @@index([teamId])
+  @@index([userId])
+}
+
+enum TeamTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  ENTRY_FEE
+  PRIZE_WINNING
+  MEMBER_CONTRIBUTION
+  REFUND
+}
+
+model TeamMoneyRequest {
+  id            String    @id @default(cuid())
+  teamId        String
+  team          Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  requestedBy   String
+  requestedFrom String
+  amount        Float
+  reason        String?
+  status        MoneyRequestStatus @default(PENDING)
+  createdAt     DateTime  @default(now())
+  respondedAt   DateTime?
+  
+  @@index([teamId])
+  @@index([requestedFrom])
+  @@index([status])
+}
+
+enum MoneyRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 model TeamMember {

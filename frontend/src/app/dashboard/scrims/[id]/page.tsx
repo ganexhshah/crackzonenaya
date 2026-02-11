@@ -12,7 +12,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { scrimService, Scrim } from "@/services/scrim.service";
+import { teamService } from "@/services/team.service";
+import { teamWalletService } from "@/services/team-wallet.service";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -23,6 +28,14 @@ export default function ScrimDetailPage() {
   const [scrim, setScrim] = useState<Scrim | null>(null);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
+  
+  // Team wallet states
+  const [userTeams, setUserTeams] = useState<any[]>([]);
+  const [selectedTeam, setSelectedTeam] = useState<any>(null);
+  const [teamBalance, setTeamBalance] = useState(0);
+  const [showMoneyRequestDialog, setShowMoneyRequestDialog] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
 
   useEffect(() => {
     if (params.id) {
@@ -53,24 +66,146 @@ export default function ScrimDetailPage() {
     try {
       setRegistering(true);
       
-      // Check if paid scrim
-      if (scrim?.scrimConfig?.entryPrizeSettings?.entryType === "PAID") {
-        const entryFee = scrim.scrimConfig.entryPrizeSettings.entryFeeAmount || 0;
-        toast.info(`Entry fee: ₹${entryFee}. Redirecting to payment...`);
-        // TODO: Implement payment flow
-        // For now, just show message
-        toast.success("Registration initiated! Complete payment to confirm.");
+      const scrimType = scrim?.scrimConfig?.basicInformation?.scrimType;
+      const isPaid = scrim?.scrimConfig?.entryPrizeSettings?.entryType === "PAID";
+      const entryFee = scrim?.scrimConfig?.entryPrizeSettings?.entryFeeAmount || 0;
+
+      // Check if team scrim
+      if (scrimType === 'SQUAD' || scrimType === 'DUO') {
+        // Load user teams
+        const teams: any = await teamService.getUserTeams();
+        setUserTeams(teams);
+
+        if (!teams || teams.length === 0) {
+          toast.error("You need to join a team first!");
+          setTimeout(() => router.push('/dashboard/teams'), 2000);
+          return;
+        }
+
+        // Find team where user is leader
+        const leaderTeam = teams.find((t: any) => t.ownerId === user.id);
+
+        if (!leaderTeam) {
+          toast.error("Only team leader can register for team scrims!");
+          toast.info("Please ask your team leader to register");
+          return;
+        }
+
+        setSelectedTeam(leaderTeam);
+
+        // Check if paid scrim
+        if (isPaid && entryFee > 0) {
+          // Get team wallet balance
+          const balanceData = await teamWalletService.getBalance(leaderTeam.id);
+          setTeamBalance(balanceData.balance);
+
+          if (balanceData.balance < entryFee) {
+            // Insufficient team wallet - need to collect from members
+            toast.info(`Team wallet has ₹${balanceData.balance}. Need ₹${entryFee} for entry.`);
+            
+            // Load team members with their balances
+            const teamDetails: any = await teamService.getTeam(leaderTeam.id);
+            const members = teamDetails.members || [];
+            
+            // Filter out the leader
+            const otherMembers = members.filter((m: any) => m.userId !== user.id);
+            setTeamMembers(otherMembers);
+            
+            // Auto-select all members initially
+            setSelectedMembers(otherMembers.map((m: any) => m.userId));
+            
+            // Show money request dialog
+            setShowMoneyRequestDialog(true);
+            setRegistering(false);
+            return;
+          }
+
+          // Team has sufficient balance - proceed with registration
+          toast.success("Team wallet has sufficient balance!");
+          await registerTeamForScrim(leaderTeam.id, entryFee);
+        } else {
+          // Free scrim - direct registration
+          await registerTeamForScrim(leaderTeam.id, 0);
+        }
       } else {
-        // Free scrim - direct registration
-        await scrimService.addPlayer(scrim!.id, user.id);
-        toast.success("Successfully registered for scrim!");
-        loadScrim(); // Reload to update participant count
+        // Solo scrim - existing logic
+        if (isPaid && entryFee > 0) {
+          toast.info(`Entry fee: ₹${entryFee}. Redirecting to payment...`);
+          // TODO: Implement solo payment flow
+          toast.success("Registration initiated! Complete payment to confirm.");
+        } else {
+          await scrimService.addPlayer(scrim!.id, user.id);
+          toast.success("Successfully registered for scrim!");
+          loadScrim();
+        }
       }
     } catch (error: any) {
       toast.error(error?.message || "Failed to register");
     } finally {
       setRegistering(false);
     }
+  };
+
+  const registerTeamForScrim = async (teamId: string, entryFee: number) => {
+    try {
+      // TODO: Implement actual team registration API
+      // For now, just show success
+      toast.success(`Team registered successfully! Entry fee: ₹${entryFee}`);
+      loadScrim();
+    } catch (error: any) {
+      throw new Error(error?.message || "Failed to register team");
+    }
+  };
+
+  const handleSendMoneyRequests = async () => {
+    if (selectedMembers.length === 0) {
+      toast.error("Please select at least one team member");
+      return;
+    }
+
+    if (!selectedTeam) return;
+
+    try {
+      const entryFee = scrim?.scrimConfig?.entryPrizeSettings?.entryFeeAmount || 0;
+      const needed = entryFee - teamBalance;
+      const perMember = needed / (selectedMembers.length + 1); // +1 for leader
+
+      // Send money requests
+      const result = await teamWalletService.requestMoney(
+        selectedTeam.id,
+        selectedMembers,
+        perMember,
+        `Entry fee for ${scrim?.title}`
+      );
+
+      toast.success(`Money requests sent to ${selectedMembers.length} members!`);
+      toast.info(`Each member needs to contribute ₹${perMember.toFixed(2)}`);
+      
+      setShowMoneyRequestDialog(false);
+      
+      // Show info about next steps
+      setTimeout(() => {
+        toast.info("Waiting for team members to approve requests...");
+      }, 1000);
+    } catch (error: any) {
+      if (error?.insufficientMembers) {
+        const members = error.insufficientMembers;
+        toast.error(`Some members have insufficient balance:`);
+        members.forEach((m: any) => {
+          toast.error(`${m.username}: ₹${m.balance} (need ₹${m.required})`);
+        });
+      } else {
+        toast.error(error?.message || "Failed to send money requests");
+      }
+    }
+  };
+
+  const toggleMember = (memberId: string) => {
+    setSelectedMembers(prev => 
+      prev.includes(memberId)
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    );
   };
 
   const formatDate = (value: string) => 
@@ -120,49 +255,49 @@ export default function ScrimDetailPage() {
   const canRegister = scrim.status === "SCHEDULED";
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6">
+    <div className="p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 sm:gap-4">
         <Link href="/dashboard/scrims">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
+          <Button variant="ghost" size="sm" className="text-xs sm:text-sm">
+            <ArrowLeft className="w-3 h-3 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
             Back
           </Button>
         </Link>
       </div>
 
       {/* Title & Status */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">{scrim.title}</h1>
-          {scrim.description && (
-            <p className="text-muted-foreground mt-2">{scrim.description}</p>
-          )}
+      <div className="flex flex-col gap-3 sm:gap-4">
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold leading-tight">{scrim.title}</h1>
+          <Badge className={`${statusColors[scrim.status]} text-white shrink-0 text-xs sm:text-sm`}>
+            {scrim.status}
+          </Badge>
         </div>
-        <Badge className={`${statusColors[scrim.status]} text-white w-fit`}>
-          {scrim.status}
-        </Badge>
+        {scrim.description && (
+          <p className="text-sm sm:text-base text-muted-foreground">{scrim.description}</p>
+        )}
       </div>
 
       {/* Prize Pool Highlight (if paid) */}
       {isPaid && prizePool && (
-        <Card className="border-2 border-yellow-500 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-950/20 dark:to-orange-950/20">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+        <Card className="border-2 border-yellow-500 bg-linear-to-r from-yellow-50 to-orange-50 dark:from-yellow-950/20 dark:to-orange-950/20">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <Trophy className="w-10 h-10 text-yellow-600" />
+                <Trophy className="w-8 h-8 sm:w-10 sm:h-10 text-yellow-600 shrink-0" />
                 <div>
-                  <div className="text-sm text-muted-foreground">Total Prize Pool</div>
-                  <div className="text-3xl font-bold text-yellow-600">
+                  <div className="text-xs sm:text-sm text-muted-foreground">Total Prize Pool</div>
+                  <div className="text-2xl sm:text-3xl font-bold text-yellow-600">
                     ₹{prizePool.prizePool?.toFixed(2) || "0.00"}
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <Wallet className="w-8 h-8 text-green-600" />
+                <Wallet className="w-6 h-6 sm:w-8 sm:h-8 text-green-600 shrink-0" />
                 <div>
-                  <div className="text-sm text-muted-foreground">Entry Fee</div>
-                  <div className="text-2xl font-bold text-green-600">
+                  <div className="text-xs sm:text-sm text-muted-foreground">Entry Fee</div>
+                  <div className="text-xl sm:text-2xl font-bold text-green-600">
                     ₹{entry.entryFeeAmount || 0}
                   </div>
                 </div>
@@ -173,32 +308,32 @@ export default function ScrimDetailPage() {
       )}
 
       {/* Main Info Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
         {/* Basic Information */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Info className="w-5 h-5" />
+          <CardHeader className="pb-3 sm:pb-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Info className="w-4 h-4 sm:w-5 sm:h-5" />
               Basic Information
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Type</span>
-              <Badge variant="outline">{basic?.scrimType || "N/A"}</Badge>
+          <CardContent className="space-y-2 sm:space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Type</span>
+              <Badge variant="outline" className="text-xs">{basic?.scrimType || "N/A"}</Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Game Mode</span>
-              <Badge variant="outline">{basic?.gameMode || "N/A"}</Badge>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Game Mode</span>
+              <Badge variant="outline" className="text-xs">{basic?.gameMode || "N/A"}</Badge>
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Map</span>
-              <Badge variant="outline">{basic?.mapSelection || "N/A"}</Badge>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Map</span>
+              <Badge variant="outline" className="text-xs">{basic?.mapSelection || "N/A"}</Badge>
             </div>
             {basic?.scrimCode && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Scrim Code</span>
-                <code className="text-sm font-mono bg-muted px-2 py-1 rounded">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Scrim Code</span>
+                <code className="text-xs sm:text-sm font-mono bg-muted px-2 py-1 rounded">
                   {basic.scrimCode}
                 </code>
               </div>
@@ -208,34 +343,34 @@ export default function ScrimDetailPage() {
 
         {/* Date & Time */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-5 h-5" />
+          <CardHeader className="pb-3 sm:pb-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Calendar className="w-4 h-4 sm:w-5 sm:h-5" />
               Schedule
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2 sm:space-y-3">
             <div>
-              <div className="text-sm text-muted-foreground mb-1">Match Date</div>
-              <div className="font-semibold">{formatDate(scrim.scheduledAt)}</div>
+              <div className="text-xs sm:text-sm text-muted-foreground mb-1">Match Date</div>
+              <div className="font-semibold text-sm sm:text-base">{formatDate(scrim.scheduledAt)}</div>
             </div>
             <div>
-              <div className="text-sm text-muted-foreground mb-1">Match Time</div>
-              <div className="font-semibold flex items-center gap-2">
-                <Clock className="w-4 h-4" />
+              <div className="text-xs sm:text-sm text-muted-foreground mb-1">Match Time</div>
+              <div className="font-semibold flex items-center gap-2 text-sm sm:text-base">
+                <Clock className="w-3 h-3 sm:w-4 sm:h-4" />
                 {formatTime(scrim.scheduledAt)}
               </div>
             </div>
             {dateTime?.registrationOpenTime && (
               <div>
-                <div className="text-sm text-muted-foreground mb-1">Registration Opens</div>
-                <div className="text-sm">{formatTime(dateTime.registrationOpenTime)}</div>
+                <div className="text-xs sm:text-sm text-muted-foreground mb-1">Registration Opens</div>
+                <div className="text-xs sm:text-sm">{formatTime(dateTime.registrationOpenTime)}</div>
               </div>
             )}
             {dateTime?.registrationCloseTime && (
               <div>
-                <div className="text-sm text-muted-foreground mb-1">Registration Closes</div>
-                <div className="text-sm">{formatTime(dateTime.registrationCloseTime)}</div>
+                <div className="text-xs sm:text-sm text-muted-foreground mb-1">Registration Closes</div>
+                <div className="text-xs sm:text-sm">{formatTime(dateTime.registrationCloseTime)}</div>
               </div>
             )}
           </CardContent>
@@ -243,21 +378,21 @@ export default function ScrimDetailPage() {
 
         {/* Slots */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Users className="w-5 h-5" />
+          <CardHeader className="pb-3 sm:pb-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Users className="w-4 h-4 sm:w-5 sm:h-5" />
               Slots
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2 sm:space-y-3">
             {basic?.scrimType === "SOLO" ? (
               <>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Total Slots</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Total Slots</span>
                   <span className="font-semibold">{slots?.totalSlots || 0}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Registered</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Registered</span>
                   <span className="font-semibold text-green-600">
                     {scrim._count?.players || 0}
                   </span>
@@ -265,16 +400,16 @@ export default function ScrimDetailPage() {
               </>
             ) : (
               <>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Team Slots</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Team Slots</span>
                   <span className="font-semibold">{slots?.totalTeamSlots || 0}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Players Per Team</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Players Per Team</span>
                   <span className="font-semibold">{slots?.playersPerTeam || 0}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Teams Registered</span>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Teams Registered</span>
                   <span className="font-semibold text-green-600">
                     {scrim._count?.players || 0}
                   </span>
@@ -282,8 +417,8 @@ export default function ScrimDetailPage() {
               </>
             )}
             <Separator />
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Available</span>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Available</span>
               <span className="font-semibold text-blue-600">
                 {(basic?.scrimType === "SOLO" 
                   ? (slots?.totalSlots || 0) 
@@ -533,31 +668,136 @@ export default function ScrimDetailPage() {
         </Card>
       )}
 
-      {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        {canRegister && (
-          <Button 
-            size="lg" 
-            className="flex-1" 
-            onClick={handleRegister}
-            disabled={registering}
-          >
-            {registering ? "Registering..." : isPaid ? `Pay ₹${entry.entryFeeAmount} & Register` : "Register for Free"}
-          </Button>
-        )}
-        {scrim.status === "LIVE" && scrim.roomId && (
-          <Button size="lg" className="flex-1" variant="default">
-            Join Room Now
-          </Button>
-        )}
-        {scrim.status === "COMPLETED" && (
-          <Button size="lg" className="flex-1" variant="outline" asChild>
-            <Link href={`/dashboard/scrims/${scrim.id}/results`}>
-              View Results
-            </Link>
-          </Button>
-        )}
+      {/* Action Buttons - MOBILE OPTIMIZED */}
+      <div className="sticky bottom-0 left-0 right-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-t p-3 sm:p-4 -mx-3 sm:-mx-4 md:-mx-6 lg:-mx-8 mt-6">
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 max-w-7xl mx-auto">
+          {canRegister && (
+            <Button 
+              size="lg" 
+              className="flex-1 h-12 sm:h-11 text-base sm:text-sm font-semibold" 
+              onClick={handleRegister}
+              disabled={registering}
+            >
+              {registering ? "Registering..." : isPaid ? `Pay ₹${entry.entryFeeAmount} & Register` : "Register for Free"}
+            </Button>
+          )}
+          {scrim.status === "LIVE" && scrim.roomId && (
+            <Button size="lg" className="flex-1 h-12 sm:h-11 text-base sm:text-sm font-semibold" variant="default">
+              Join Room Now
+            </Button>
+          )}
+          {scrim.status === "COMPLETED" && (
+            <Button size="lg" className="flex-1 h-12 sm:h-11 text-base sm:text-sm font-semibold" variant="outline" asChild>
+              <Link href={`/dashboard/scrims/${scrim.id}/results`}>
+                View Results
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Money Request Dialog */}
+      <Dialog open={showMoneyRequestDialog} onOpenChange={setShowMoneyRequestDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Team Entry Fee Required</DialogTitle>
+            <DialogDescription>
+              Request money from team members to fund the entry fee
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Fee Breakdown */}
+            <div className="bg-muted p-4 rounded-lg space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Total Entry Fee:</span>
+                <span className="font-bold">₹{entry?.entryFeeAmount || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Team Wallet:</span>
+                <span className="text-green-600 font-semibold">₹{teamBalance.toFixed(2)}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Need to Collect:</span>
+                <span className="font-bold text-red-600">
+                  ₹{((entry?.entryFeeAmount || 0) - teamBalance).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Per Member Contribution */}
+            <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-lg">
+              <div className="text-sm text-muted-foreground mb-1">Per Member Contribution</div>
+              <div className="text-2xl font-bold text-blue-600">
+                ₹{(((entry?.entryFeeAmount || 0) - teamBalance) / (selectedMembers.length + 1)).toFixed(2)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Split among {selectedMembers.length + 1} members (including you)
+              </div>
+            </div>
+
+            {/* Member Selection */}
+            <div>
+              <h4 className="font-semibold mb-3">Select Team Members</h4>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {teamMembers.map((member: any) => {
+                  const perMember = ((entry?.entryFeeAmount || 0) - teamBalance) / (selectedMembers.length + 1);
+                  const hasBalance = (member.user?.balance || 0) >= perMember;
+                  
+                  return (
+                    <div key={member.userId} className="flex items-center space-x-3 p-2 rounded hover:bg-muted">
+                      <Checkbox
+                        id={member.userId}
+                        checked={selectedMembers.includes(member.userId)}
+                        onCheckedChange={() => toggleMember(member.userId)}
+                        disabled={!hasBalance}
+                      />
+                      <Label 
+                        htmlFor={member.userId} 
+                        className="flex-1 cursor-pointer flex items-center justify-between"
+                      >
+                        <span className={!hasBalance ? 'text-muted-foreground' : ''}>
+                          {member.user?.username || 'Unknown'}
+                        </span>
+                        <span className={`text-sm ${hasBalance ? 'text-green-600' : 'text-red-600'}`}>
+                          ₹{(member.user?.balance || 0).toFixed(2)}
+                          {!hasBalance && ' ⚠️'}
+                        </span>
+                      </Label>
+                    </div>
+                  );
+                })}
+              </div>
+              {teamMembers.some((m: any) => (m.user?.balance || 0) < ((entry?.entryFeeAmount || 0) - teamBalance) / (selectedMembers.length + 1)) && (
+                <Alert className="mt-3">
+                  <AlertDescription className="text-xs">
+                    ⚠️ Members with insufficient balance are disabled
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowMoneyRequestDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleSendMoneyRequests}
+                disabled={selectedMembers.length === 0}
+              >
+                Request Money ({selectedMembers.length})
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

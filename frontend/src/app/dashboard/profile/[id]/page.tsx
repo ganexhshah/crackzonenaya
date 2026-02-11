@@ -25,8 +25,18 @@ import {
   Award,
   Activity,
   Clock,
-  Star
+  Star,
+  Instagram,
+  Link as LinkIcon,
+  Save,
+  X,
+  Copy,
+  Check
 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -38,6 +48,8 @@ interface UserProfile {
   avatar?: string;
   role: string;
   createdAt: string;
+  gameName?: string;
+  gameId?: string;
   profile?: {
     gameId?: string;
     gameUsername?: string;
@@ -46,6 +58,7 @@ interface UserProfile {
     phone?: string;
     country?: string;
     discordId?: string;
+    instagramHandle?: string;
   };
   teams?: any[];
   stats?: {
@@ -64,6 +77,25 @@ export default function UserProfilePage() {
   const { user: currentUser } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editProfileDialogOpen, setEditProfileDialogOpen] = useState(false);
+  const [socialHandles, setSocialHandles] = useState({
+    discordId: '',
+    instagramHandle: ''
+  });
+  const [profileData, setProfileData] = useState({
+    gameName: '',
+    gameId: '',
+    gameUsername: '',
+    rank: '',
+    bio: '',
+    phone: '',
+    country: '',
+    discordId: '',
+    instagramHandle: ''
+  });
+  const [saving, setSaving] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const userId = params.id as string;
 
   useEffect(() => {
@@ -71,6 +103,26 @@ export default function UserProfilePage() {
       fetchUserProfile();
     }
   }, [userId]);
+
+  useEffect(() => {
+    if (profile?.profile) {
+      setSocialHandles({
+        discordId: profile.profile.discordId || '',
+        instagramHandle: profile.profile.instagramHandle || ''
+      });
+      setProfileData({
+        gameName: profile.gameName || '',
+        gameId: profile.gameId || '',
+        gameUsername: profile.profile.gameUsername || '',
+        rank: profile.profile.rank || '',
+        bio: profile.profile.bio || '',
+        phone: profile.profile.phone || '',
+        country: profile.profile.country || '',
+        discordId: profile.profile.discordId || '',
+        instagramHandle: profile.profile.instagramHandle || ''
+      });
+    }
+  }, [profile]);
 
   const fetchUserProfile = async () => {
     try {
@@ -123,6 +175,50 @@ export default function UserProfilePage() {
 
   const handleAddFriend = () => {
     toast.info("Friend system coming soon!");
+  };
+
+  const handleSaveSocialHandles = async () => {
+    try {
+      setSaving(true);
+      await api.put(`/users/${userId}/profile`, {
+        discordId: socialHandles.discordId,
+        instagramHandle: socialHandles.instagramHandle
+      });
+      toast.success("Social handles updated successfully!");
+      setEditDialogOpen(false);
+      fetchUserProfile();
+    } catch (error: any) {
+      console.error('Failed to update social handles:', error);
+      toast.error(error.response?.data?.message || 'Failed to update social handles');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCopyToClipboard = async (text: string, fieldName: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      toast.success(`${fieldName} copied to clipboard!`);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch (error) {
+      toast.error('Failed to copy to clipboard');
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      setSaving(true);
+      await api.put(`/users/${userId}/profile`, profileData);
+      toast.success("Profile updated successfully!");
+      setEditProfileDialogOpen(false);
+      fetchUserProfile();
+    } catch (error: any) {
+      console.error('Failed to update profile:', error);
+      toast.error(error.response?.data?.message || 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -178,10 +274,157 @@ export default function UserProfilePage() {
               <div className="flex flex-wrap gap-2 justify-center md:justify-start">
                 {isOwnProfile ? (
                   <>
-                    <Button onClick={() => router.push('/profile/setup')}>
-                      <Edit className="mr-2 h-4 w-4" />
-                      Edit Profile
-                    </Button>
+                    <Dialog open={editProfileDialogOpen} onOpenChange={setEditProfileDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <Edit className="mr-2 h-4 w-4" />
+                          Edit Profile
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                          <DialogTitle>Edit Profile</DialogTitle>
+                          <DialogDescription>
+                            Update your profile information, game details, and social handles
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-6 py-4">
+                          {/* Game Information Section */}
+                          <div className="space-y-4">
+                            <h3 className="text-sm font-semibold flex items-center gap-2">
+                              <Gamepad2 className="h-4 w-4 text-purple-500" />
+                              Game Information
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label htmlFor="gameId">Game ID</Label>
+                                <Input
+                                  id="gameId"
+                                  placeholder="Enter your game ID"
+                                  value={profileData.gameId}
+                                  onChange={(e) => setProfileData({ ...profileData, gameId: e.target.value })}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="gameName">Game Name</Label>
+                                <Input
+                                  id="gameName"
+                                  placeholder="Enter your game name"
+                                  value={profileData.gameName}
+                                  onChange={(e) => setProfileData({ ...profileData, gameName: e.target.value })}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="gameUsername">Alt Game Username</Label>
+                                <Input
+                                  id="gameUsername"
+                                  placeholder="Alternative game username"
+                                  value={profileData.gameUsername}
+                                  onChange={(e) => setProfileData({ ...profileData, gameUsername: e.target.value })}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="rank">Rank</Label>
+                                <Input
+                                  id="rank"
+                                  placeholder="Your rank (e.g., Diamond, Master)"
+                                  value={profileData.rank}
+                                  onChange={(e) => setProfileData({ ...profileData, rank: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          {/* Social Handles Section */}
+                          <div className="space-y-4">
+                            <h3 className="text-sm font-semibold flex items-center gap-2">
+                              <LinkIcon className="h-4 w-4" />
+                              Social Handles
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label htmlFor="discordId" className="flex items-center gap-2">
+                                  <MessageCircle className="h-4 w-4 text-indigo-500" />
+                                  Discord Username
+                                </Label>
+                                <Input
+                                  id="discordId"
+                                  placeholder="username#1234"
+                                  value={profileData.discordId}
+                                  onChange={(e) => setProfileData({ ...profileData, discordId: e.target.value })}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="instagramHandle" className="flex items-center gap-2">
+                                  <Instagram className="h-4 w-4 text-pink-500" />
+                                  Instagram Handle
+                                </Label>
+                                <Input
+                                  id="instagramHandle"
+                                  placeholder="@username"
+                                  value={profileData.instagramHandle}
+                                  onChange={(e) => setProfileData({ ...profileData, instagramHandle: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <Separator />
+
+                          {/* Personal Information Section */}
+                          <div className="space-y-4">
+                            <h3 className="text-sm font-semibold flex items-center gap-2">
+                              <Globe className="h-4 w-4" />
+                              Personal Information
+                            </h3>
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <Label htmlFor="bio">Bio</Label>
+                                <Textarea
+                                  id="bio"
+                                  placeholder="Tell us about yourself..."
+                                  value={profileData.bio}
+                                  onChange={(e) => setProfileData({ ...profileData, bio: e.target.value })}
+                                  rows={3}
+                                />
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                  <Label htmlFor="phone">Phone Number</Label>
+                                  <Input
+                                    id="phone"
+                                    placeholder="+1234567890"
+                                    value={profileData.phone}
+                                    onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor="country">Country</Label>
+                                  <Input
+                                    id="country"
+                                    placeholder="Your country"
+                                    value={profileData.country}
+                                    onChange={(e) => setProfileData({ ...profileData, country: e.target.value })}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => setEditProfileDialogOpen(false)} disabled={saving}>
+                            <X className="h-4 w-4 mr-2" />
+                            Cancel
+                          </Button>
+                          <Button onClick={handleSaveProfile} disabled={saving}>
+                            <Save className="h-4 w-4 mr-2" />
+                            {saving ? 'Saving...' : 'Save Changes'}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                     <Button variant="outline" onClick={() => router.push('/dashboard/settings')}>
                       <Shield className="mr-2 h-4 w-4" />
                       Settings
@@ -206,55 +449,256 @@ export default function UserProfilePage() {
       </Card>
 
       {/* Game Info Card */}
-      {profile.profile && (
-        <Card>
-          <CardHeader>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
             <CardTitle className="flex items-center gap-2">
               <Gamepad2 className="h-5 w-5 text-purple-500" />
               Game Information
             </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {profile.profile.gameUsername && (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Game Username</p>
-                  <p className="font-medium">{profile.profile.gameUsername}</p>
+            <CardDescription className="mt-1">
+              In-game details and social handles
+            </CardDescription>
+          </div>
+          {isOwnProfile && (
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Socials
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Edit Social Handles</DialogTitle>
+                  <DialogDescription>
+                    Update your Discord and Instagram handles
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="discord" className="flex items-center gap-2">
+                      <MessageCircle className="h-4 w-4 text-indigo-500" />
+                      Discord Username
+                    </Label>
+                    <Input
+                      id="discord"
+                      placeholder="username#1234"
+                      value={socialHandles.discordId}
+                      onChange={(e) => setSocialHandles({ ...socialHandles, discordId: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="instagram" className="flex items-center gap-2">
+                      <Instagram className="h-4 w-4 text-pink-500" />
+                      Instagram Handle
+                    </Label>
+                    <Input
+                      id="instagram"
+                      placeholder="@username"
+                      value={socialHandles.instagramHandle}
+                      onChange={(e) => setSocialHandles({ ...socialHandles, instagramHandle: e.target.value })}
+                    />
+                  </div>
                 </div>
-              )}
-              {profile.profile.gameId && (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Game ID</p>
-                  <p className="font-medium">{profile.profile.gameId}</p>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setEditDialogOpen(false)} disabled={saving}>
+                    <X className="h-4 w-4 mr-2" />
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveSocialHandles} disabled={saving}>
+                    <Save className="h-4 w-4 mr-2" />
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </Button>
                 </div>
-              )}
-              {profile.profile.rank && (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Rank</p>
-                  <Badge variant="secondary" className="font-medium">
-                    <Star className="h-3 w-3 mr-1" />
-                    {profile.profile.rank}
-                  </Badge>
-                </div>
-              )}
-              {profile.profile.country && (
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">Country</p>
-                  <p className="font-medium flex items-center gap-2">
-                    <Globe className="h-4 w-4" />
-                    {profile.profile.country}
-                  </p>
-                </div>
-              )}
-            </div>
-            
-            {(isOwnProfile && profile.profile.phone) && (
-              <Separator className="my-4" />
-            )}
-            
-            {isOwnProfile && (
+              </DialogContent>
+            </Dialog>
+          )}
+        </CardHeader>
+        <CardContent>
+          {/* Primary Game Info - From User Model */}
+          {(profile.gameId || profile.gameName) && (
+            <div className="mb-6">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-muted-foreground">
+                <Gamepad2 className="h-4 w-4" />
+                Primary Game Account
+              </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {profile.profile.phone && (
+                {/* Game ID from User */}
+                {profile.gameId && (
+                  <button
+                    onClick={() => handleCopyToClipboard(profile.gameId!, 'Game ID')}
+                    className="space-y-2 p-5 bg-gradient-to-br from-purple-500/10 to-indigo-500/10 border-2 border-purple-500/20 rounded-lg hover:border-purple-500/40 hover:shadow-lg transition-all duration-200 cursor-pointer text-left group relative"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">Game ID</p>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        {copiedField === 'Game ID' ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4 text-purple-500" />
+                        )}
+                      </div>
+                    </div>
+                    <p className="font-mono font-bold text-2xl text-purple-600 dark:text-purple-400">{profile.gameId}</p>
+                    <p className="text-xs text-muted-foreground">Click to copy</p>
+                  </button>
+                )}
+                
+                {/* Game Name from User */}
+                {profile.gameName && (
+                  <button
+                    onClick={() => handleCopyToClipboard(profile.gameName!, 'Game Name')}
+                    className="space-y-2 p-5 bg-gradient-to-br from-indigo-500/10 to-blue-500/10 border-2 border-indigo-500/20 rounded-lg hover:border-indigo-500/40 hover:shadow-lg transition-all duration-200 cursor-pointer text-left group relative"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">Game Name</p>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        {copiedField === 'Game Name' ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4 text-indigo-500" />
+                        )}
+                      </div>
+                    </div>
+                    <p className="font-bold text-2xl text-indigo-600 dark:text-indigo-400">{profile.gameName}</p>
+                    <p className="text-xs text-muted-foreground">Click to copy</p>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Additional Game Info - From Profile Model */}
+          {profile.profile && (profile.profile.gameId || profile.profile.gameUsername || profile.profile.rank) && (
+            <>
+              {(profile.gameId || profile.gameName) && <Separator className="my-6" />}
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-muted-foreground">
+                  <Star className="h-4 w-4" />
+                  Additional Game Details
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Game ID from Profile */}
+                  {profile.profile.gameId && (
+                    <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Alt Game ID</p>
+                      <p className="font-mono font-semibold text-lg">{profile.profile.gameId}</p>
+                    </div>
+                  )}
+                  
+                  {/* Game Username from Profile */}
+                  {profile.profile.gameUsername && (
+                    <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Alt Game Name</p>
+                      <p className="font-semibold text-lg">{profile.profile.gameUsername}</p>
+                    </div>
+                  )}
+                  
+                  {/* Rank */}
+                  {profile.profile.rank && (
+                    <div className="space-y-2 p-4 bg-muted/50 rounded-lg border">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Rank</p>
+                      <Badge variant="secondary" className="font-medium text-base">
+                        <Star className="h-4 w-4 mr-1" />
+                        {profile.profile.rank}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+          
+          {/* Social Handles Section */}
+          {(profile.profile?.discordId || profile.profile?.instagramHandle || isOwnProfile) && (
+            <>
+              <Separator className="my-6" />
+              <div>
+                <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                  <LinkIcon className="h-4 w-4" />
+                  Social Handles
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Discord */}
+                  <button
+                    onClick={() => profile.profile?.discordId && handleCopyToClipboard(profile.profile.discordId, 'Discord')}
+                    disabled={!profile.profile?.discordId}
+                    className={`flex items-center gap-3 p-4 border rounded-lg transition-all ${
+                      profile.profile?.discordId 
+                        ? 'hover:bg-muted/50 hover:border-indigo-500/40 hover:shadow-md cursor-pointer group' 
+                        : 'opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                      <MessageCircle className="h-5 w-5 text-indigo-500" />
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-xs text-muted-foreground">Discord</p>
+                      <p className="font-medium truncate">
+                        {profile.profile?.discordId || (isOwnProfile ? 'Not set' : 'Private')}
+                      </p>
+                    </div>
+                    {profile.profile?.discordId && (
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        {copiedField === 'Discord' ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4 text-indigo-500" />
+                        )}
+                      </div>
+                    )}
+                  </button>
+                  
+                  {/* Instagram */}
+                  <button
+                    onClick={() => profile.profile?.instagramHandle && handleCopyToClipboard(profile.profile.instagramHandle, 'Instagram')}
+                    disabled={!profile.profile?.instagramHandle}
+                    className={`flex items-center gap-3 p-4 border rounded-lg transition-all ${
+                      profile.profile?.instagramHandle 
+                        ? 'hover:bg-muted/50 hover:border-pink-500/40 hover:shadow-md cursor-pointer group' 
+                        : 'opacity-60 cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="w-10 h-10 rounded-full bg-pink-500/10 flex items-center justify-center">
+                      <Instagram className="h-5 w-5 text-pink-500" />
+                    </div>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-xs text-muted-foreground">Instagram</p>
+                      <p className="font-medium truncate">
+                        {profile.profile?.instagramHandle || (isOwnProfile ? 'Not set' : 'Private')}
+                      </p>
+                    </div>
+                    {profile.profile?.instagramHandle && (
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        {copiedField === 'Instagram' ? (
+                          <Check className="h-4 w-4 text-green-500" />
+                        ) : (
+                          <Copy className="h-4 w-4 text-pink-500" />
+                        )}
+                      </div>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+          
+          {/* Additional Info */}
+          {(profile.profile?.country || (isOwnProfile && profile.profile?.phone)) && (
+            <>
+              <Separator className="my-6" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {profile.profile.country && (
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Country</p>
+                    <p className="font-medium flex items-center gap-2">
+                      <Globe className="h-4 w-4" />
+                      {profile.profile.country}
+                    </p>
+                  </div>
+                )}
+                {isOwnProfile && profile.profile.phone && (
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">Phone</p>
                     <p className="font-medium flex items-center gap-2">
@@ -263,20 +707,11 @@ export default function UserProfilePage() {
                     </p>
                   </div>
                 )}
-                {profile.profile.discordId && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground">Discord</p>
-                    <p className="font-medium flex items-center gap-2">
-                      <MessageCircle className="h-4 w-4" />
-                      {profile.profile.discordId}
-                    </p>
-                  </div>
-                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Tabs for different sections */}
       <Tabs defaultValue="stats" className="w-full">

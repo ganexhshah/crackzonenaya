@@ -94,26 +94,26 @@ export default function WalletPage() {
 
       {/* Balance Card */}
       <Card className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-0">
-        <CardContent className="p-6 md:p-8">
-          <div className="flex items-start justify-between mb-6">
+        <CardContent className="p-4 sm:p-6 md:p-8">
+          <div className="flex items-start justify-between mb-4 sm:mb-6">
             <div>
-              <p className="text-white/80 text-sm mb-2">Available Balance</p>
+              <p className="text-white/80 text-xs sm:text-sm mb-2">Available Balance</p>
               <div className="flex items-baseline gap-2">
                 {balanceLoading ? (
-                  <div className="h-12 w-48 bg-white/20 rounded animate-pulse" />
+                  <div className="h-10 sm:h-12 w-32 sm:w-48 bg-white/20 rounded animate-pulse" />
                 ) : (
-                  <span className="text-4xl md:text-5xl font-bold">
+                  <span className="text-3xl sm:text-4xl md:text-5xl font-bold">
                     {walletData.currency} {walletData.balance.toFixed(2)}
                   </span>
                 )}
               </div>
             </div>
-            <Wallet className="h-12 w-12 text-white/50" />
+            <Wallet className="h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 text-white/50 flex-shrink-0" />
           </div>
 
           {walletData.pendingAmount > 0 && (
-            <div className="flex items-center gap-2 text-sm text-white/80 mb-6">
-              <Clock className="h-4 w-4" />
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-white/80 mb-4 sm:mb-6">
+              <Clock className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
               {balanceLoading ? (
                 <div className="h-4 w-32 bg-white/20 rounded animate-pulse" />
               ) : (
@@ -122,15 +122,15 @@ export default function WalletPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
             <Dialog open={isAddMoneyOpen} onOpenChange={setIsAddMoneyOpen}>
               <DialogTrigger asChild>
-                <Button variant="secondary" className="w-full">
-                  <Plus className="mr-2 h-4 w-4" />
+                <Button variant="secondary" className="w-full text-sm sm:text-base">
+                  <Plus className="mr-1 sm:mr-2 h-4 w-4" />
                   Add Money
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md mx-4">
                 <AddMoneyDialog 
                   onClose={() => {
                     setIsAddMoneyOpen(false);
@@ -142,12 +142,12 @@ export default function WalletPage() {
 
             <Dialog open={isWithdrawOpen} onOpenChange={setIsWithdrawOpen}>
               <DialogTrigger asChild>
-                <Button variant="secondary" className="w-full">
-                  <Minus className="mr-2 h-4 w-4" />
+                <Button variant="secondary" className="w-full text-sm sm:text-base">
+                  <Minus className="mr-1 sm:mr-2 h-4 w-4" />
                   Withdraw
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="max-w-md mx-4">
                 <WithdrawDialog 
                   onClose={() => {
                     setIsWithdrawOpen(false);
@@ -164,66 +164,94 @@ export default function WalletPage() {
       {/* Transactions */}
       <Card>
         <CardHeader>
-          <CardTitle>Transaction History</CardTitle>
-          <CardDescription>View all your wallet transactions</CardDescription>
+          <CardTitle className="text-lg sm:text-xl">Transaction History</CardTitle>
+          <CardDescription className="text-sm">View all your wallet transactions</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-3 sm:px-6">
           <Tabs defaultValue="all">
-            <TabsList className="grid w-full grid-cols-4 mb-6">
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="deposit">Deposits</TabsTrigger>
-              <TabsTrigger value="withdrawal">Withdrawals</TabsTrigger>
-              <TabsTrigger value="payment">Payments</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-4 mb-4 sm:mb-6 h-auto">
+              <TabsTrigger value="all" className="text-xs sm:text-sm px-2 py-2">All</TabsTrigger>
+              <TabsTrigger value="deposit" className="text-xs sm:text-sm px-2 py-2">Deposits</TabsTrigger>
+              <TabsTrigger value="withdrawal" className="text-xs sm:text-sm px-2 py-2">Withdrawals</TabsTrigger>
+              <TabsTrigger value="payment" className="text-xs sm:text-sm px-2 py-2">Payments</TabsTrigger>
             </TabsList>
 
             <TabsContent value="all" className="space-y-3">
-              {transactions.map((transaction) => (
-                <TransactionCard
-                  key={transaction.id}
-                  transaction={transaction}
-                  onViewReceipt={setSelectedReceipt}
-                  formatDate={formatDate}
-                />
-              ))}
+              {transactions.length > 0 ? (
+                transactions.map((transaction) => (
+                  <TransactionCard
+                    key={transaction.id}
+                    transaction={transaction}
+                    onViewReceipt={setSelectedReceipt}
+                    formatDate={formatDate}
+                  />
+                ))
+              ) : (
+                <div className="text-center py-12">
+                  <Wallet className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No transactions yet</p>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="deposit" className="space-y-3">
-              {transactions
-                .filter((t) => t.type === "deposit")
-                .map((transaction) => (
-                  <TransactionCard
-                    key={transaction.id}
-                    transaction={transaction}
-                    onViewReceipt={setSelectedReceipt}
-                    formatDate={formatDate}
-                  />
-                ))}
+              {transactions.filter((t) => t.type === "deposit").length > 0 ? (
+                transactions
+                  .filter((t) => t.type === "deposit")
+                  .map((transaction) => (
+                    <TransactionCard
+                      key={transaction.id}
+                      transaction={transaction}
+                      onViewReceipt={setSelectedReceipt}
+                      formatDate={formatDate}
+                    />
+                  ))
+              ) : (
+                <div className="text-center py-12">
+                  <ArrowDownLeft className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No deposits yet</p>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="withdrawal" className="space-y-3">
-              {transactions
-                .filter((t) => t.type === "withdrawal")
-                .map((transaction) => (
-                  <TransactionCard
-                    key={transaction.id}
-                    transaction={transaction}
-                    onViewReceipt={setSelectedReceipt}
-                    formatDate={formatDate}
-                  />
-                ))}
+              {transactions.filter((t) => t.type === "withdrawal").length > 0 ? (
+                transactions
+                  .filter((t) => t.type === "withdrawal")
+                  .map((transaction) => (
+                    <TransactionCard
+                      key={transaction.id}
+                      transaction={transaction}
+                      onViewReceipt={setSelectedReceipt}
+                      formatDate={formatDate}
+                    />
+                  ))
+              ) : (
+                <div className="text-center py-12">
+                  <ArrowUpRight className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No withdrawals yet</p>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="payment" className="space-y-3">
-              {transactions
-                .filter((t) => t.type === "payment")
-                .map((transaction) => (
-                  <TransactionCard
-                    key={transaction.id}
-                    transaction={transaction}
-                    onViewReceipt={setSelectedReceipt}
-                    formatDate={formatDate}
-                  />
-                ))}
+              {transactions.filter((t) => t.type === "payment").length > 0 ? (
+                transactions
+                  .filter((t) => t.type === "payment")
+                  .map((transaction) => (
+                    <TransactionCard
+                      key={transaction.id}
+                      transaction={transaction}
+                      onViewReceipt={setSelectedReceipt}
+                      formatDate={formatDate}
+                    />
+                  ))
+              ) : (
+                <div className="text-center py-12">
+                  <DollarSign className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No payments yet</p>
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         </CardContent>
@@ -231,27 +259,27 @@ export default function WalletPage() {
 
       {/* Receipt Preview Dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={() => setSelectedReceipt(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
           <DialogHeader>
-            <DialogTitle>Transaction Receipt</DialogTitle>
-            <DialogDescription>Transaction ID: {selectedReceipt?.reference}</DialogDescription>
+            <DialogTitle className="text-lg sm:text-xl">Transaction Receipt</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">Transaction ID: {selectedReceipt?.reference}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
               <div>
-                <p className="text-muted-foreground">Type</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Type</p>
                 <p className="font-medium capitalize">{selectedReceipt?.type}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Amount</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Amount</p>
                 <p className="font-medium">रु {Math.abs(selectedReceipt?.amount || 0)}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Method</p>
-                <p className="font-medium">{selectedReceipt?.method}</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Method</p>
+                <p className="font-medium truncate">{selectedReceipt?.method}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">Status</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Status</p>
                 <Badge
                   variant={
                     selectedReceipt?.status === "Verified"
@@ -265,7 +293,7 @@ export default function WalletPage() {
                 </Badge>
               </div>
               <div className="col-span-2">
-                <p className="text-muted-foreground">Date</p>
+                <p className="text-muted-foreground text-xs sm:text-sm">Date</p>
                 <p className="font-medium">{formatDate(selectedReceipt?.date)}</p>
               </div>
             </div>
@@ -321,10 +349,10 @@ function TransactionCard({ transaction, onViewReceipt, formatDate }: any) {
   const isPayment = transaction.type === "payment";
 
   return (
-    <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 border rounded-lg hover:bg-muted/50 transition-colors gap-3">
       <div className="flex items-center gap-3">
         <div
-          className={`w-10 h-10 rounded-full flex items-center justify-center ${
+          className={`w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center ${
             isDeposit
               ? "bg-green-100 dark:bg-green-900"
               : isWithdrawal
@@ -340,22 +368,22 @@ function TransactionCard({ transaction, onViewReceipt, formatDate }: any) {
             <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           )}
         </div>
-        <div>
-          <p className="font-medium capitalize">
+        <div className="min-w-0 flex-1">
+          <p className="font-medium capitalize truncate">
             {transaction.description || transaction.type}
           </p>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>{transaction.method}</span>
-            <span>•</span>
-            <span>{formatDate(transaction.date)}</span>
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2 text-xs sm:text-sm text-muted-foreground">
+            <span className="truncate">{transaction.method}</span>
+            <span className="hidden sm:inline">•</span>
+            <span className="truncate">{formatDate(transaction.date)}</span>
           </div>
         </div>
       </div>
 
-      <div className="text-right flex items-center gap-3">
+      <div className="flex items-center justify-between sm:justify-end gap-3 sm:text-right">
         <div>
           <p
-            className={`font-semibold ${
+            className={`font-semibold text-sm sm:text-base ${
               isDeposit ? "text-green-600" : isPayment ? "text-red-600" : ""
             }`}
           >
@@ -383,6 +411,7 @@ function TransactionCard({ transaction, onViewReceipt, formatDate }: any) {
             variant="ghost"
             size="sm"
             onClick={() => onViewReceipt(transaction)}
+            className="flex-shrink-0"
           >
             <Eye className="h-4 w-4" />
           </Button>
@@ -488,37 +517,37 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
     return (
       <>
         <DialogHeader>
-          <DialogTitle>Complete Payment - {selectedMethod.name}</DialogTitle>
-          <DialogDescription>Amount: रु {amount}</DialogDescription>
+          <DialogTitle className="text-lg sm:text-xl">Complete Payment - {selectedMethod.name}</DialogTitle>
+          <DialogDescription className="text-xs sm:text-sm">Amount: रु {amount}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
           {/* Payment Method Info */}
-          <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+          <div className="bg-muted/50 p-3 sm:p-4 rounded-lg space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Payment Method</span>
-              <span className="font-medium">{selectedMethod.name}</span>
+              <span className="text-xs sm:text-sm text-muted-foreground">Payment Method</span>
+              <span className="font-medium text-sm sm:text-base">{selectedMethod.name}</span>
             </div>
             {selectedMethod.upiId && (
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">UPI ID</span>
-                <span className="font-mono text-sm">{selectedMethod.upiId}</span>
+                <span className="text-xs sm:text-sm text-muted-foreground">UPI ID</span>
+                <span className="font-mono text-xs sm:text-sm break-all">{selectedMethod.upiId}</span>
               </div>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Amount</span>
-              <span className="font-bold text-lg">रु {amount}</span>
+              <span className="text-xs sm:text-sm text-muted-foreground">Amount</span>
+              <span className="font-bold text-base sm:text-lg">रु {amount}</span>
             </div>
           </div>
 
           {/* QR Code */}
           {selectedMethod.qrCodeUrl && (
-            <div className="border-2 border-dashed rounded-lg p-6 text-center bg-white dark:bg-muted">
+            <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center bg-white dark:bg-muted">
               <img
                 src={selectedMethod.qrCodeUrl}
                 alt={`${selectedMethod.name} QR Code`}
-                className="w-64 h-64 mx-auto object-contain rounded-lg"
+                className="w-48 h-48 sm:w-64 sm:h-64 mx-auto object-contain rounded-lg"
               />
-              <p className="text-sm font-medium mt-4">Scan to pay रु {amount}</p>
+              <p className="text-xs sm:text-sm font-medium mt-3 sm:mt-4">Scan to pay रु {amount}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Use your {selectedMethod.name} app to scan and pay
               </p>
@@ -529,12 +558,12 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
 
           {/* Upload Screenshot */}
           <div className="space-y-2">
-            <Label>Upload Payment Screenshot *</Label>
+            <Label className="text-sm sm:text-base">Upload Payment Screenshot *</Label>
             {screenshot ? (
               <div className="space-y-2">
-                <div className="border rounded-lg p-4 bg-muted/50">
+                <div className="border rounded-lg p-3 sm:p-4 bg-muted/50">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium">{screenshot.name}</span>
+                    <span className="text-xs sm:text-sm font-medium truncate pr-2">{screenshot.name}</span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -549,7 +578,7 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
             ) : (
-              <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+              <div className="border-2 border-dashed rounded-lg p-6 sm:p-8 text-center hover:border-primary/50 transition-colors">
                 <input
                   type="file"
                   accept="image/*"
@@ -559,7 +588,7 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                 />
                 <label htmlFor="screenshot" className="cursor-pointer">
                   <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                  <p className="text-sm font-medium">Click to upload</p>
+                  <p className="text-xs sm:text-sm font-medium">Click to upload</p>
                   <p className="text-xs text-muted-foreground mt-1">PNG, JPG (Max 5MB)</p>
                 </label>
               </div>
@@ -568,24 +597,25 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
 
           {/* Transaction ID */}
           <div className="space-y-2">
-            <Label htmlFor="txnId">Transaction ID *</Label>
+            <Label htmlFor="txnId" className="text-sm sm:text-base">Transaction ID *</Label>
             <Input
               id="txnId"
               placeholder="Enter transaction ID from payment app"
               value={transactionId}
               onChange={(e) => setTransactionId(e.target.value)}
+              className="text-sm sm:text-base"
             />
             <p className="text-xs text-muted-foreground">
               Find this in your payment app after completing the transaction
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => setStep("amount")}>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <Button variant="outline" className="flex-1 h-11 sm:h-12 text-sm sm:text-base" onClick={() => setStep("amount")}>
               Back
             </Button>
             <Button 
-              className="flex-1" 
+              className="flex-1 h-11 sm:h-12 text-sm sm:text-base" 
               onClick={handleSubmit} 
               disabled={submitting || !screenshot || !transactionId}
             >
@@ -600,12 +630,12 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Add Money</DialogTitle>
-        <DialogDescription>Choose amount and payment method</DialogDescription>
+        <DialogTitle className="text-lg sm:text-xl">Add Money</DialogTitle>
+        <DialogDescription className="text-xs sm:text-sm">Choose amount and payment method</DialogDescription>
       </DialogHeader>
       <div className="space-y-4 py-4">
         <div className="space-y-2">
-          <Label htmlFor="amount">Amount (रु)</Label>
+          <Label htmlFor="amount" className="text-sm sm:text-base">Amount (रु)</Label>
           <Input
             id="amount"
             type="number"
@@ -613,34 +643,35 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             min="1"
+            className="text-base sm:text-lg h-11 sm:h-12"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground">
             Minimum deposit: रु 100
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label>Payment Method</Label>
+          <Label className="text-sm sm:text-base">Payment Method</Label>
           {paymentMethods.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {paymentMethods.filter(m => m.isActive).map((method) => (
                 <button
                   key={method.id}
                   onClick={() => setSelectedMethod(method)}
-                  className={`p-4 border-2 rounded-lg transition-all hover:scale-105 ${
+                  className={`p-3 sm:p-4 border-2 rounded-lg transition-all hover:scale-105 ${
                     selectedMethod?.id === method.id
                       ? "border-primary bg-primary/10 shadow-md"
                       : "border-border hover:border-primary/50"
                   }`}
                 >
-                  <p className="font-semibold">{method.name}</p>
+                  <p className="font-semibold text-sm sm:text-base">{method.name}</p>
                   <p className="text-xs text-muted-foreground mt-1">{method.type}</p>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="text-center p-8 border-2 border-dashed rounded-lg">
-              <p className="text-sm text-muted-foreground">
+            <div className="text-center p-6 sm:p-8 border-2 border-dashed rounded-lg">
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 No payment methods available. Please contact admin.
               </p>
             </div>
@@ -648,7 +679,7 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <Button
-          className="w-full"
+          className="w-full h-11 sm:h-12 text-sm sm:text-base"
           onClick={() => setStep("payment")}
           disabled={!amount || Number(amount) < 100 || !selectedMethod}
         >
@@ -700,14 +731,14 @@ function WithdrawDialog({ onClose, walletBalance }: { onClose: () => void; walle
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Withdraw Money</DialogTitle>
-        <DialogDescription>
+        <DialogTitle className="text-lg sm:text-xl">Withdraw Money</DialogTitle>
+        <DialogDescription className="text-xs sm:text-sm">
           Available Balance: रु {walletBalance.toFixed(2)}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-4 py-4">
         <div className="space-y-2">
-          <Label htmlFor="withdrawAmount">Amount (रु)</Label>
+          <Label htmlFor="withdrawAmount" className="text-sm sm:text-base">Amount (रु)</Label>
           <Input
             id="withdrawAmount"
             type="number"
@@ -715,40 +746,41 @@ function WithdrawDialog({ onClose, walletBalance }: { onClose: () => void; walle
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             max={walletBalance}
+            className="text-base sm:text-lg h-11 sm:h-12"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground">
             Minimum withdrawal: रु 100
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label>Withdrawal Method</Label>
-          <div className="grid grid-cols-2 gap-3">
+          <Label className="text-sm sm:text-base">Withdrawal Method</Label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               onClick={() => setMethod("esewa")}
-              className={`p-4 border-2 rounded-lg transition-all ${
+              className={`p-3 sm:p-4 border-2 rounded-lg transition-all ${
                 method === "esewa"
                   ? "border-primary bg-primary/10"
                   : "border-border hover:border-primary/50"
               }`}
             >
-              <p className="font-semibold">eSewa</p>
+              <p className="font-semibold text-sm sm:text-base">eSewa</p>
             </button>
             <button
               onClick={() => setMethod("khalti")}
-              className={`p-4 border-2 rounded-lg transition-all ${
+              className={`p-3 sm:p-4 border-2 rounded-lg transition-all ${
                 method === "khalti"
                   ? "border-primary bg-primary/10"
                   : "border-border hover:border-primary/50"
               }`}
             >
-              <p className="font-semibold">Khalti</p>
+              <p className="font-semibold text-sm sm:text-base">Khalti</p>
             </button>
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="accountNumber">
+          <Label htmlFor="accountNumber" className="text-sm sm:text-base">
             {method === "esewa" ? "eSewa" : "Khalti"} Number
           </Label>
           <Input
@@ -756,16 +788,17 @@ function WithdrawDialog({ onClose, walletBalance }: { onClose: () => void; walle
             placeholder="Enter your account number"
             value={accountNumber}
             onChange={(e) => setAccountNumber(e.target.value)}
+            className="text-sm sm:text-base h-11 sm:h-12"
           />
         </div>
 
         <div className="bg-yellow-50 dark:bg-yellow-950 p-3 rounded-lg">
-          <p className="text-sm text-yellow-900 dark:text-yellow-100">
+          <p className="text-xs sm:text-sm text-yellow-900 dark:text-yellow-100">
             <strong>Note:</strong> Withdrawal requests are processed within 24-48 hours
           </p>
         </div>
 
-        <Button className="w-full" onClick={handleSubmit} disabled={submitting}>
+        <Button className="w-full h-11 sm:h-12 text-sm sm:text-base" onClick={handleSubmit} disabled={submitting}>
           {submitting ? "Submitting..." : "Submit Withdrawal Request"}
         </Button>
       </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from "@/components/ui/carousel";
 import {
   Dialog,
@@ -17,47 +18,12 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Trophy, Calendar, Users, DollarSign, Clock, Filter, User, UserPlus, Info, MapPin, AlertCircle, Wallet as WalletIcon } from "lucide-react";
+import { Trophy, Calendar, Users, DollarSign, Clock, Filter, User, UserPlus, Info, MapPin, AlertCircle, Wallet as WalletIcon, Crown, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-
-const banners = [
-  {
-    id: 1,
-    title: "Free Fire Championship 2024",
-    subtitle: "Join the biggest tournament of the year",
-    image: "bg-gradient-to-r from-orange-500 to-red-600",
-    cta: "Register Now",
-    href: "/dashboard/tournaments",
-  },
-  {
-    id: 2,
-    title: "Weekly Squad Battle",
-    subtitle: "Compete with your team for amazing prizes",
-    image: "bg-gradient-to-r from-blue-500 to-indigo-600",
-    cta: "Join Battle",
-    href: "/dashboard/tournaments",
-  },
-  {
-    id: 3,
-    title: "Practice Mode Available",
-    subtitle: "Improve your skills before the big match",
-    image: "bg-gradient-to-r from-green-500 to-teal-600",
-    cta: "Start Practice",
-    href: "/dashboard/practice",
-  },
-  {
-    id: 4,
-    title: "Find Your Squad",
-    subtitle: "Connect with players and form the ultimate team",
-    image: "bg-gradient-to-r from-purple-500 to-pink-600",
-    cta: "Browse Teams",
-    href: "/dashboard/teams",
-  },
-];
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -72,6 +38,8 @@ export default function DashboardPage() {
   const [scrims, setScrims] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [scrimsLoading, setScrimsLoading] = useState(true);
+  const [userTeams, setUserTeams] = useState<any[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
   const [stats, setStats] = useState({
     activeTournaments: 0,
     playersOnline: 0,
@@ -85,6 +53,7 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchTournaments();
     fetchScrims();
+    fetchUserTeams();
   }, []);
 
   const fetchScrims = async () => {
@@ -98,6 +67,20 @@ export default function DashboardPage() {
       setScrims([]);
     } finally {
       setScrimsLoading(false);
+    }
+  };
+
+  const fetchUserTeams = async () => {
+    try {
+      setTeamsLoading(true);
+      const data: any = await api.get('/teams/my-teams');
+      const teamsData = Array.isArray(data) ? data : [];
+      setUserTeams(teamsData);
+    } catch (error: any) {
+      console.error('Failed to fetch teams:', error);
+      setUserTeams([]);
+    } finally {
+      setTeamsLoading(false);
     }
   };
 
@@ -179,43 +162,179 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Banner Carousel */}
+      {/* Quick Access Carousel - Teams & Wallet */}
       <div className="relative">
         <Carousel
           opts={{
             align: "start",
-            loop: true,
+            loop: false,
           }}
           className="w-full"
         >
-          <CarouselContent>
-            {banners.map((banner) => (
-              <CarouselItem key={banner.id}>
-                <Link href={banner.href}>
-                  <Card className={`${banner.image} border-0 text-white overflow-hidden cursor-pointer hover:scale-[1.02] transition-transform h-[200px] md:h-[240px]`}>
-                    <CardContent className="p-6 md:p-8 lg:p-10 relative h-full flex flex-col justify-center">
-                      <div className="relative z-10">
-                        <h2 className="text-xl md:text-3xl lg:text-4xl font-bold mb-2 line-clamp-2">
-                          {banner.title}
-                        </h2>
-                        <p className="text-white/90 text-sm md:text-base mb-4 md:mb-6 max-w-md line-clamp-2">
-                          {banner.subtitle}
-                        </p>
-                        <Button size="default" variant="secondary" className="font-semibold md:text-base">
-                          {banner.cta}
-                        </Button>
+          <CarouselContent className="-ml-2 md:-ml-4">
+            {/* Wallet Balance Card */}
+            <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+              <Link href="/dashboard/wallet">
+                <Card className="bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600 border-0 text-white overflow-hidden cursor-pointer hover:scale-[1.02] transition-all hover:shadow-2xl h-[200px] sm:h-[220px]">
+                  <CardContent className="p-5 sm:p-6 relative h-full flex flex-col justify-between">
+                    <div className="relative z-10">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="p-2 sm:p-3 bg-white/20 backdrop-blur-sm rounded-xl">
+                          <WalletIcon className="h-6 w-6 sm:h-7 sm:w-7" />
+                        </div>
+                        <Badge variant="secondary" className="text-xs font-semibold shadow-sm">Active</Badge>
                       </div>
-                      {/* Decorative Elements */}
-                      <div className="absolute top-0 right-0 w-40 h-40 md:w-64 md:h-64 bg-white/10 rounded-full blur-3xl"></div>
-                      <div className="absolute bottom-0 left-0 w-32 h-32 md:w-48 md:h-48 bg-black/10 rounded-full blur-2xl"></div>
+                      <div>
+                        <p className="text-white/90 text-xs sm:text-sm font-medium mb-1">Wallet Balance</p>
+                        <h3 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 tracking-tight">
+                          ₹{walletBalance.toFixed(2)}
+                        </h3>
+                      </div>
+                    </div>
+                    <div className="relative z-10">
+                      <Button size="sm" variant="secondary" className="font-semibold shadow-lg hover:shadow-xl transition-shadow w-full sm:w-auto">
+                        Add Money
+                      </Button>
+                    </div>
+                    {/* Decorative Elements */}
+                    <div className="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-white/10 rounded-full blur-3xl"></div>
+                    <div className="absolute bottom-0 left-0 w-24 h-24 sm:w-32 sm:h-32 bg-black/10 rounded-full blur-2xl"></div>
+                    <div className="absolute top-1/2 right-1/4 w-20 h-20 bg-white/5 rounded-full blur-xl"></div>
+                  </CardContent>
+                </Card>
+              </Link>
+            </CarouselItem>
+
+            {/* User Teams Cards */}
+            {teamsLoading ? (
+              <>
+                {[1, 2].map((i) => (
+                  <CarouselItem key={i} className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+                    <Card className="animate-pulse h-[200px] sm:h-[220px]">
+                      <CardContent className="p-5 sm:p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="h-14 w-14 bg-muted rounded-full shrink-0" />
+                          <div className="flex-1">
+                            <div className="h-5 w-3/4 bg-muted rounded mb-2" />
+                            <div className="h-4 w-1/2 bg-muted rounded" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-6">
+                          <div className="h-12 bg-muted rounded" />
+                          <div className="h-12 bg-muted rounded" />
+                          <div className="h-12 bg-muted rounded" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </CarouselItem>
+                ))}
+              </>
+            ) : userTeams.length > 0 ? (
+              userTeams.map((team) => {
+                const isOwner = team.ownerId === user?.id;
+                const memberCount = team.members?.length || 0;
+                
+                return (
+                  <CarouselItem key={team.id} className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+                    <Link href={`/dashboard/teams/${team.id}`}>
+                      <Card className="hover:shadow-xl transition-all hover:scale-[1.02] cursor-pointer h-[200px] sm:h-[220px] border-2 hover:border-primary/50">
+                        <CardContent className="p-5 sm:p-6 h-full flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-start gap-3 mb-4">
+                              <Avatar className="w-14 h-14 sm:w-16 sm:h-16 border-2 border-primary shrink-0 shadow-lg">
+                                <AvatarImage src={team.logo} />
+                                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-base sm:text-lg">
+                                  {team.tag}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h3 className="font-bold text-base sm:text-lg truncate">{team.name}</h3>
+                                  {isOwner && <Crown className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-500 shrink-0" />}
+                                </div>
+                                <p className="text-xs sm:text-sm text-muted-foreground mb-2">Tag: {team.tag}</p>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={isOwner ? "default" : "secondary"} className="text-xs">
+                                    {isOwner ? "Leader" : "Member"}
+                                  </Badge>
+                                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <Users className="h-3 w-3" />
+                                    <span>{memberCount} {memberCount === 1 ? 'member' : 'members'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                              <div className="font-bold text-base sm:text-lg text-blue-600 dark:text-blue-400">{team.stats?.matches || 0}</div>
+                              <p className="text-xs text-muted-foreground">Matches</p>
+                            </div>
+                            <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                              <div className="font-bold text-base sm:text-lg text-green-600 dark:text-green-400">{team.stats?.wins || 0}</div>
+                              <p className="text-xs text-muted-foreground">Wins</p>
+                            </div>
+                            <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+                              <div className="font-bold text-base sm:text-lg text-purple-600 dark:text-purple-400">{team.stats?.points || 0}</div>
+                              <p className="text-xs text-muted-foreground">Points</p>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  </CarouselItem>
+                );
+              })
+            ) : (
+              <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+                <Card className="border-2 border-dashed hover:border-solid hover:border-primary transition-all h-[200px] sm:h-[220px]">
+                  <CardContent className="p-5 sm:p-6 h-full flex flex-col items-center justify-center text-center">
+                    <div className="p-3 bg-muted rounded-full mb-3">
+                      <Users className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
+                    </div>
+                    <p className="font-semibold text-sm sm:text-base mb-1">No Teams Yet</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground mb-4">Create or join a team to get started</p>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                      <Button asChild size="sm" variant="outline" className="flex-1 sm:flex-none">
+                        <Link href="/dashboard/teams/create">
+                          <UserPlus className="mr-1 h-3 w-3" />
+                          Create
+                        </Link>
+                      </Button>
+                      <Button asChild size="sm" className="flex-1 sm:flex-none">
+                        <Link href="/dashboard/teams">
+                          <Shield className="mr-1 h-3 w-3" />
+                          Browse
+                        </Link>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </CarouselItem>
+            )}
+
+            {/* View All Teams Card */}
+            {userTeams.length > 0 && (
+              <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+                <Link href="/dashboard/teams">
+                  <Card className="border-dashed hover:border-solid hover:shadow-lg transition-all cursor-pointer h-[180px]">
+                    <CardContent className="p-6 h-full flex flex-col items-center justify-center text-center">
+                      <Shield className="h-12 w-12 mb-3 text-primary" />
+                      <p className="font-semibold mb-1">View All Teams</p>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Manage your {userTeams.length} team{userTeams.length !== 1 ? 's' : ''}
+                      </p>
+                      <Button size="sm">
+                        Go to Teams
+                      </Button>
                     </CardContent>
                   </Card>
                 </Link>
               </CarouselItem>
-            ))}
+            )}
           </CarouselContent>
-          <CarouselPrevious className="hidden md:flex -left-4" />
-          <CarouselNext className="hidden md:flex -right-4" />
+          <CarouselPrevious className="hidden lg:flex -left-4" />
+          <CarouselNext className="hidden lg:flex -right-4" />
         </Carousel>
       </div>
 

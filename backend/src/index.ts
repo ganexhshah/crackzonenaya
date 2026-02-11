@@ -14,6 +14,7 @@ import transactionRoutes from './routes/transaction.routes';
 import adminRoutes from './routes/admin.routes';
 import paymentMethodRoutes from './routes/payment-method.routes';
 import scrimRoutes from './routes/scrim.routes';
+import teamWalletRoutes from './routes/team-wallet.routes';
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/teams', teamRoutes);
+app.use('/api/team-wallet', teamWalletRoutes);
 app.use('/api/matches', matchRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/transactions', transactionRoutes);

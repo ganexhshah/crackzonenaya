@@ -54,10 +54,29 @@ import {
   UserMinus,
   Settings,
   Users,
+  Wallet,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Send,
+  Download,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { teamWalletService, TeamTransaction, MoneyRequest } from "@/services/team-wallet.service";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -77,8 +96,23 @@ export default function TeamDetailPage() {
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
+  // Wallet states
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [transactions, setTransactions] = useState<TeamTransaction[]>([]);
+  const [moneyRequests, setMoneyRequests] = useState<MoneyRequest[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<MoneyRequest[]>([]);
+  const [isRequestMoneyOpen, setIsRequestMoneyOpen] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+  const [requestAmount, setRequestAmount] = useState("");
+  const [requestReason, setRequestReason] = useState("");
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+  const [transactionFilter, setTransactionFilter] = useState("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const transactionsPerPage = 10;
+
   useEffect(() => {
     fetchTeam();
+    fetchWalletData();
   }, [teamId]);
 
   const fetchTeam = async () => {
@@ -92,6 +126,24 @@ export default function TeamDetailPage() {
       router.push('/dashboard/teams');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchWalletData = async () => {
+    try {
+      const [balanceData, transactionsData, requestsData, pendingData] = await Promise.all([
+        teamWalletService.getBalance(teamId),
+        teamWalletService.getTransactions(teamId),
+        teamWalletService.getTeamRequests(teamId).catch(() => []),
+        teamWalletService.getPendingRequests().catch(() => []),
+      ]);
+
+      setWalletBalance(balanceData.balance);
+      setTransactions(transactionsData);
+      setMoneyRequests(requestsData);
+      setPendingRequests(pendingData.filter((req: MoneyRequest) => req.teamId === teamId));
+    } catch (error: any) {
+      console.error('Failed to fetch wallet data:', error);
     }
   };
 
@@ -166,6 +218,96 @@ export default function TeamDetailPage() {
     }
   };
 
+  const handleRequestMoney = async () => {
+    if (selectedMembers.length === 0) {
+      toast.error('Please select at least one member');
+      return;
+    }
+
+    const amount = parseFloat(requestAmount);
+    if (!amount || amount <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    setIsSubmittingRequest(true);
+    try {
+      await teamWalletService.requestMoney(teamId, selectedMembers, amount, requestReason);
+      toast.success('Money requests sent successfully!');
+      setIsRequestMoneyOpen(false);
+      setSelectedMembers([]);
+      setRequestAmount("");
+      setRequestReason("");
+      fetchWalletData();
+    } catch (error: any) {
+      console.error('Failed to request money:', error);
+      toast.error(error.response?.data?.error || 'Failed to send money requests');
+    } finally {
+      setIsSubmittingRequest(false);
+    }
+  };
+
+  const handleRespondToRequest = async (requestId: string, action: 'approve' | 'reject') => {
+    try {
+      await teamWalletService.respondToRequest(requestId, action);
+      toast.success(action === 'approve' ? 'Request approved!' : 'Request rejected');
+      fetchWalletData();
+    } catch (error: any) {
+      console.error('Failed to respond to request:', error);
+      toast.error(error.response?.data?.error || 'Failed to process request');
+    }
+  };
+
+  const toggleMemberSelection = (userId: string) => {
+    setSelectedMembers(prev =>
+      prev.includes(userId)
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
+  };
+
+  const exportTransactions = () => {
+    const csv = [
+      ['Date', 'Type', 'Amount', 'Description'],
+      ...filteredTransactions.map(t => [
+        new Date(t.createdAt).toLocaleDateString(),
+        t.type,
+        t.amount.toString(),
+        t.description || '',
+      ]),
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `team-${teamId}-transactions.csv`;
+    a.click();
+    toast.success('Transactions exported!');
+  };
+
+  const filteredTransactions = transactions.filter(t => {
+    if (transactionFilter === 'all') return true;
+    return t.type === transactionFilter;
+  });
+
+  const paginatedTransactions = filteredTransactions.slice(
+    (currentPage - 1) * transactionsPerPage,
+    currentPage * transactionsPerPage
+  );
+
+  const totalPages = Math.ceil(filteredTransactions.length / transactionsPerPage);
+
+  const walletStats = {
+    totalDeposits: transactions
+      .filter(t => t.type === 'MEMBER_CONTRIBUTION' || t.type === 'DEPOSIT')
+      .reduce((sum, t) => sum + t.amount, 0),
+    totalWithdrawals: transactions
+      .filter(t => t.type === 'TOURNAMENT_FEE' || t.type === 'WITHDRAWAL')
+      .reduce((sum, t) => sum + t.amount, 0),
+    transactionCount: transactions.length,
+  };
+
   if (loading) {
     return (
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
@@ -199,40 +341,43 @@ export default function TeamDetailPage() {
   const stats = team.stats || { matches: 0, wins: 0, losses: 0, points: 0, rank: 0 };
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6">
+    <div className="p-3 sm:p-4 md:p-6 lg:p-8 space-y-4 md:space-y-6 pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div className="flex items-start gap-4">
-          <Button variant="ghost" size="icon" asChild className="mt-1">
+      <div className="flex flex-col gap-4">
+        {/* Back button and team info */}
+        <div className="flex items-start gap-2 sm:gap-4">
+          <Button variant="ghost" size="icon" asChild className="mt-1 shrink-0">
             <Link href="/dashboard/teams">
               <ArrowLeft className="h-5 w-5" />
             </Link>
           </Button>
-          <div className="flex items-center gap-4">
-            <Avatar className="w-16 h-16 md:w-20 md:h-20 border-4 border-primary">
+          <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+            <Avatar className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 border-2 sm:border-4 border-primary shrink-0">
               <AvatarImage src={team.logo} />
-              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-2xl font-bold">
+              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-lg sm:text-xl md:text-2xl font-bold">
                 {team.tag}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-2">
-                {team.name}
-                {isOwner && <Crown className="h-6 w-6 text-yellow-500" />}
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold flex items-center gap-2 truncate">
+                <span className="truncate">{team.name}</span>
+                {isOwner && <Crown className="h-5 w-5 sm:h-6 sm:w-6 text-yellow-500 shrink-0" />}
               </h1>
-              <p className="text-muted-foreground">Tag: {team.tag}</p>
-              <Badge variant="default" className="mt-2">Active</Badge>
+              <p className="text-sm sm:text-base text-muted-foreground truncate">Tag: {team.tag}</p>
+              <Badge variant="default" className="mt-1 sm:mt-2 text-xs">Active</Badge>
             </div>
           </div>
         </div>
 
+        {/* Action buttons */}
         {isOwner && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline">
+                <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
                   <Share2 className="mr-2 h-4 w-4" />
-                  Invite
+                  <span className="hidden sm:inline">Invite</span>
+                  <span className="sm:hidden">Invite</span>
                 </Button>
               </DialogTrigger>
               <DialogContent>
@@ -267,17 +412,19 @@ export default function TeamDetailPage() {
               </DialogContent>
             </Dialog>
 
-            <Button asChild>
+            <Button asChild size="sm" className="flex-1 sm:flex-none">
               <Link href={`/dashboard/teams/${teamId}/edit`}>
                 <Edit className="mr-2 h-4 w-4" />
-                Edit Team
+                <span className="hidden sm:inline">Edit Team</span>
+                <span className="sm:hidden">Edit</span>
               </Link>
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon">
+                <Button variant="outline" size="sm" className="px-2 sm:px-3">
                   <Settings className="h-4 w-4" />
+                  <span className="sr-only">Settings</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -307,52 +454,62 @@ export default function TeamDetailPage() {
         )}
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="members">
-            <Users className="mr-2 h-4 w-4" />
-            Members ({team.members?.length || 0})
+      <Tabs defaultValue="overview" className="space-y-4 md:space-y-6">
+        <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto gap-1 p-1">
+          <TabsTrigger value="overview" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <span className="hidden sm:inline">Overview</span>
+            <span className="sm:hidden">Info</span>
+          </TabsTrigger>
+          <TabsTrigger value="wallet" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <Wallet className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Wallet</span>
+            <span className="sm:hidden truncate">Wallet</span>
+          </TabsTrigger>
+          <TabsTrigger value="members" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <Users className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Members ({team.members?.length || 0})</span>
+            <span className="sm:hidden">({team.members?.length || 0})</span>
           </TabsTrigger>
           {isOwner && (
-            <TabsTrigger value="management">
-              <Shield className="mr-2 h-4 w-4" />
-              Management
+            <TabsTrigger value="management" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+              <Shield className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">Management</span>
+              <span className="sm:hidden truncate">Manage</span>
             </TabsTrigger>
           )}
         </TabsList>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <TabsContent value="overview" className="space-y-4 md:space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
             {/* Left Column - Team Stats */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="lg:col-span-2 space-y-4 md:space-y-6">
               {/* Team Stats */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Team Statistics</CardTitle>
+                  <CardTitle className="text-lg sm:text-xl">Team Statistics</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 sm:gap-4">
                     <div className="text-center">
-                      <div className="text-3xl font-bold text-blue-600">{stats.matches}</div>
-                      <p className="text-sm text-muted-foreground mt-1">Matches</p>
+                      <div className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.matches}</div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">Matches</p>
                     </div>
                     <div className="text-center">
-                      <div className="text-3xl font-bold text-green-600">{stats.wins}</div>
-                      <p className="text-sm text-muted-foreground mt-1">Wins</p>
+                      <div className="text-2xl sm:text-3xl font-bold text-green-600">{stats.wins}</div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">Wins</p>
                     </div>
                     <div className="text-center">
-                      <div className="text-3xl font-bold text-red-600">{stats.losses}</div>
-                      <p className="text-sm text-muted-foreground mt-1">Losses</p>
+                      <div className="text-2xl sm:text-3xl font-bold text-red-600">{stats.losses}</div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">Losses</p>
                     </div>
                     <div className="text-center">
-                      <div className="text-3xl font-bold text-purple-600">{stats.points}</div>
-                      <p className="text-sm text-muted-foreground mt-1">Points</p>
+                      <div className="text-2xl sm:text-3xl font-bold text-purple-600">{stats.points}</div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">Points</p>
                     </div>
-                    <div className="text-center">
-                      <div className="text-3xl font-bold text-orange-600">#{stats.rank || '-'}</div>
-                      <p className="text-sm text-muted-foreground mt-1">Rank</p>
+                    <div className="text-center col-span-2 sm:col-span-1">
+                      <div className="text-2xl sm:text-3xl font-bold text-orange-600">#{stats.rank || '-'}</div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mt-1">Rank</p>
                     </div>
                   </div>
                 </CardContent>
@@ -362,35 +519,35 @@ export default function TeamDetailPage() {
               {team.description && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>About Team</CardTitle>
+                    <CardTitle className="text-lg sm:text-xl">About Team</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-muted-foreground">{team.description}</p>
+                    <p className="text-sm sm:text-base text-muted-foreground">{team.description}</p>
                   </CardContent>
                 </Card>
               )}
             </div>
 
             {/* Right Column - Quick Actions */}
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Quick Actions</CardTitle>
+                  <CardTitle className="text-lg sm:text-xl">Quick Actions</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  <Button className="w-full justify-start" asChild>
+                  <Button className="w-full justify-start text-sm" asChild>
                     <Link href="/dashboard/tournaments">
                       <Trophy className="mr-2 h-4 w-4" />
                       Join Tournament
                     </Link>
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" asChild>
+                  <Button variant="outline" className="w-full justify-start text-sm" asChild>
                     <Link href="/dashboard/practice">
                       <Target className="mr-2 h-4 w-4" />
                       Practice Mode
                     </Link>
                   </Button>
-                  <Button variant="outline" className="w-full justify-start" asChild>
+                  <Button variant="outline" className="w-full justify-start text-sm" asChild>
                     <Link href="/dashboard/stats">
                       <Zap className="mr-2 h-4 w-4" />
                       View Stats
@@ -401,22 +558,22 @@ export default function TeamDetailPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Team Owner</CardTitle>
+                  <CardTitle className="text-lg sm:text-xl">Team Owner</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-3">
-                    <Avatar className="w-12 h-12">
+                    <Avatar className="w-10 h-10 sm:w-12 sm:h-12">
                       <AvatarImage src={captain?.user?.avatar} />
-                      <AvatarFallback className="bg-gradient-to-br from-yellow-500 to-orange-600 text-white">
+                      <AvatarFallback className="bg-gradient-to-br from-yellow-500 to-orange-600 text-white text-sm">
                         {captain?.user?.username?.substring(0, 2).toUpperCase() || 'O'}
                       </AvatarFallback>
                     </Avatar>
-                    <div>
-                      <p className="font-medium flex items-center gap-2">
-                        {captain?.user?.username || 'Unknown'}
-                        <Crown className="h-4 w-4 text-yellow-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium flex items-center gap-2 text-sm sm:text-base truncate">
+                        <span className="truncate">{captain?.user?.username || 'Unknown'}</span>
+                        <Crown className="h-4 w-4 text-yellow-500 shrink-0" />
                       </p>
-                      <p className="text-sm text-muted-foreground">Team Leader</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Team Leader</p>
                     </div>
                   </div>
                 </CardContent>
@@ -425,72 +582,414 @@ export default function TeamDetailPage() {
           </div>
         </TabsContent>
 
-        {/* Members Tab */}
-        <TabsContent value="members" className="space-y-6">
+        {/* Wallet Tab */}
+        <TabsContent value="wallet" className="space-y-4 md:space-y-6">
+          {/* Wallet Balance Card */}
+          <Card className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+            <CardHeader className="pb-3 sm:pb-6">
+              <CardTitle className="flex items-center gap-2 text-lg sm:text-xl">
+                <Wallet className="h-4 w-4 sm:h-5 sm:w-5" />
+                Team Wallet Balance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl sm:text-4xl font-bold mb-3 sm:mb-4">₹{walletBalance.toFixed(2)}</div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-4 text-xs sm:text-sm">
+                <div>
+                  <div className="flex items-center gap-1 text-green-200">
+                    <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Deposits</span>
+                    <span className="sm:hidden">In</span>
+                  </div>
+                  <div className="font-semibold mt-1 text-sm sm:text-base">₹{walletStats.totalDeposits.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="flex items-center gap-1 text-red-200">
+                    <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Withdrawals</span>
+                    <span className="sm:hidden">Out</span>
+                  </div>
+                  <div className="font-semibold mt-1 text-sm sm:text-base">₹{walletStats.totalWithdrawals.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="text-blue-200 truncate">
+                    <span className="hidden sm:inline">Transactions</span>
+                    <span className="sm:hidden">Total</span>
+                  </div>
+                  <div className="font-semibold mt-1 text-sm sm:text-base">{walletStats.transactionCount}</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+            {/* Money Request Section (Leader Only) */}
+            {isOwner && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Send className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Request Money from Members
+                  </CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Request contributions from team members for tournaments or expenses
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Button
+                    className="w-full text-sm"
+                    onClick={() => setIsRequestMoneyOpen(true)}
+                  >
+                    <Send className="mr-2 h-4 w-4" />
+                    Create Money Request
+                  </Button>
+
+                  {/* Sent Requests */}
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-xs sm:text-sm">Recent Requests</h4>
+                    {moneyRequests.length > 0 ? (
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
+                        {moneyRequests.slice(0, 5).map((request) => (
+                          <div
+                            key={request.id}
+                            className="p-2 sm:p-3 border rounded-lg text-xs sm:text-sm"
+                          >
+                            <div className="flex justify-between items-start mb-1">
+                              <span className="font-medium text-sm sm:text-base">₹{request.amount}</span>
+                              <Badge
+                                variant={
+                                  request.status === 'APPROVED'
+                                    ? 'default'
+                                    : request.status === 'REJECTED'
+                                    ? 'destructive'
+                                    : 'secondary'
+                                }
+                                className="text-xs"
+                              >
+                                {request.status}
+                              </Badge>
+                            </div>
+                            {request.reason && (
+                              <p className="text-muted-foreground text-xs line-clamp-2">{request.reason}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(request.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs sm:text-sm text-muted-foreground text-center py-4">
+                        No requests sent yet
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Pending Requests (For Members) */}
+            {!isOwner && pendingRequests.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
+                    Pending Money Requests
+                  </CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Requests from your team leader
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {pendingRequests.map((request) => (
+                    <div
+                      key={request.id}
+                      className="p-3 sm:p-4 border rounded-lg space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-base sm:text-lg">₹{request.amount}</div>
+                          {request.reason && (
+                            <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
+                              {request.reason}
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Requested {new Date(request.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <Button
+                          size="sm"
+                          className="flex-1 text-xs sm:text-sm"
+                          onClick={() => handleRespondToRequest(request.id, 'approve')}
+                        >
+                          <Check className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1 text-xs sm:text-sm"
+                          onClick={() => handleRespondToRequest(request.id, 'reject')}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Your balance: ₹{user?.balance || 0}
+                      </p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Recent Transactions Preview */}
+            <Card className={isOwner ? "" : "lg:col-span-2"}>
+              <CardHeader>
+                <CardTitle className="text-base sm:text-lg">Recent Transactions</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">Latest 5 transactions</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {transactions.length > 0 ? (
+                  <div className="space-y-2">
+                    {transactions.slice(0, 5).map((transaction) => (
+                      <div
+                        key={transaction.id}
+                        className="flex flex-col sm:flex-row sm:justify-between sm:items-center p-3 border rounded-lg gap-1 sm:gap-0"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-xs sm:text-sm truncate">{transaction.type.replace(/_/g, ' ')}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(transaction.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className={`font-semibold text-sm sm:text-base shrink-0 ${
+                          transaction.type.includes('CONTRIBUTION') || transaction.type === 'DEPOSIT'
+                            ? 'text-green-600'
+                            : 'text-red-600'
+                        }`}>
+                          {transaction.type.includes('CONTRIBUTION') || transaction.type === 'DEPOSIT' ? '+' : '-'}
+                          ₹{transaction.amount}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-center text-muted-foreground py-4 text-sm">
+                    No transactions yet
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Transaction History */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:gap-4">
                 <div>
-                  <CardTitle>Team Roster</CardTitle>
-                  <CardDescription>{team.members?.length || 0} members</CardDescription>
+                  <CardTitle className="text-base sm:text-lg">Transaction History</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">Complete list of all team transactions</CardDescription>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Select value={transactionFilter} onValueChange={setTransactionFilter}>
+                    <SelectTrigger className="w-full sm:w-[180px] text-xs sm:text-sm">
+                      <Filter className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                      <SelectValue placeholder="Filter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Transactions</SelectItem>
+                      <SelectItem value="MEMBER_CONTRIBUTION">Contributions</SelectItem>
+                      <SelectItem value="TOURNAMENT_FEE">Tournament Fees</SelectItem>
+                      <SelectItem value="DEPOSIT">Deposits</SelectItem>
+                      <SelectItem value="WITHDRAWAL">Withdrawals</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportTransactions}
+                    disabled={transactions.length === 0}
+                    className="text-xs sm:text-sm"
+                  >
+                    <Download className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                    <span className="hidden sm:inline">Export</span>
+                    <span className="sm:hidden">Export CSV</span>
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {paginatedTransactions.length > 0 ? (
+                <>
+                  <div className="space-y-2">
+                    {paginatedTransactions.map((transaction) => (
+                      <div
+                        key={transaction.id}
+                        className="flex flex-col gap-2 p-3 sm:p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                              <p className="font-medium text-xs sm:text-sm">{transaction.type.replace(/_/g, ' ')}</p>
+                              <Badge variant="outline" className="text-xs">
+                                {transaction.type}
+                              </Badge>
+                            </div>
+                            {transaction.description && (
+                              <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
+                                {transaction.description}
+                              </p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(transaction.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className={`text-base sm:text-lg font-bold shrink-0 ${
+                            transaction.type.includes('CONTRIBUTION') || transaction.type === 'DEPOSIT'
+                              ? 'text-green-600'
+                              : 'text-red-600'
+                          }`}>
+                            {transaction.type.includes('CONTRIBUTION') || transaction.type === 'DEPOSIT' ? '+' : '-'}
+                            ₹{transaction.amount.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination */}
+                  {totalPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4">
+                      <p className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
+                        Showing {((currentPage - 1) * transactionsPerPage) + 1} to{' '}
+                        {Math.min(currentPage * transactionsPerPage, filteredTransactions.length)} of{' '}
+                        {filteredTransactions.length} transactions
+                      </p>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: totalPages }, (_, i) => i + 1)
+                            .filter(page => {
+                              return page === 1 || 
+                                     page === totalPages || 
+                                     Math.abs(page - currentPage) <= 1;
+                            })
+                            .map((page, idx, arr) => (
+                              <>
+                                {idx > 0 && arr[idx - 1] !== page - 1 && (
+                                  <span key={`ellipsis-${page}`} className="px-1 sm:px-2 text-xs sm:text-sm">...</span>
+                                )}
+                                <Button
+                                  key={page}
+                                  variant={currentPage === page ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => setCurrentPage(page)}
+                                  className="h-8 w-8 p-0 text-xs sm:text-sm"
+                                >
+                                  {page}
+                                </Button>
+                              </>
+                            ))}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-center text-muted-foreground py-8 text-sm">
+                  No transactions found
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Members Tab */}
+        <TabsContent value="members" className="space-y-4 md:space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base sm:text-lg">Team Roster</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">{team.members?.length || 0} members</CardDescription>
                 </div>
                 {isOwner && (
-                  <Button onClick={() => setIsAddMemberOpen(true)}>
-                    <UserPlus className="mr-2 h-4 w-4" />
+                  <Button onClick={() => setIsAddMemberOpen(true)} size="sm" className="text-xs sm:text-sm">
+                    <UserPlus className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     Add Member
                   </Button>
                 )}
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2 sm:space-y-3">
               {team.members && team.members.length > 0 ? (
                 team.members.map((member: any) => (
                   <div
                     key={member.id}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                    className="flex items-center justify-between p-2 sm:p-3 border rounded-lg hover:bg-muted/50 transition-colors gap-2"
                   >
-                    <div className="flex items-center gap-3">
-                      <Avatar className="w-12 h-12">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                      <Avatar className="w-10 h-10 sm:w-12 sm:h-12 shrink-0">
                         <AvatarImage src={member.user?.avatar} />
-                        <AvatarFallback className="bg-gradient-to-br from-purple-500 to-pink-600 text-white">
+                        <AvatarFallback className="bg-gradient-to-br from-purple-500 to-pink-600 text-white text-xs sm:text-sm">
                           {member.user?.username?.substring(0, 2).toUpperCase() || 'U'}
                         </AvatarFallback>
                       </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{member.user?.username || 'Unknown'}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1 sm:gap-2">
+                          <p className="font-medium text-xs sm:text-sm truncate">{member.user?.username || 'Unknown'}</p>
                           {member.userId === team.ownerId && (
-                            <Crown className="h-4 w-4 text-yellow-500" />
+                            <Crown className="h-3 w-3 sm:h-4 sm:w-4 text-yellow-500 shrink-0" />
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground">{member.role}</p>
+                        <p className="text-xs text-muted-foreground">{member.role}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={member.role === "SUBSTITUTE" ? "secondary" : "default"}>
+                    <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+                      <Badge variant={member.role === "SUBSTITUTE" ? "secondary" : "default"} className="text-xs hidden sm:inline-flex">
                         {member.role}
                       </Badge>
                       {isOwner && member.userId !== team.ownerId && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreVertical className="h-3 w-3 sm:h-4 sm:w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Member Actions</DropdownMenuLabel>
+                            <DropdownMenuLabel className="text-xs">Member Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
                               onClick={() => handlePromoteMember(member.id, member.userId)}
+                              className="text-xs"
                             >
-                              <Shield className="mr-2 h-4 w-4" />
+                              <Shield className="mr-2 h-3 w-3" />
                               Promote to Captain
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              className="text-destructive"
+                              className="text-destructive text-xs"
                               onClick={() => setMemberToRemove(member)}
                             >
-                              <UserMinus className="mr-2 h-4 w-4" />
+                              <UserMinus className="mr-2 h-3 w-3" />
                               Remove from Team
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -500,7 +999,7 @@ export default function TeamDetailPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-center text-muted-foreground py-4">No members yet</p>
+                <p className="text-center text-muted-foreground py-4 text-sm">No members yet</p>
               )}
             </CardContent>
           </Card>
@@ -508,37 +1007,37 @@ export default function TeamDetailPage() {
 
         {/* Management Tab (Owner Only) */}
         {isOwner && (
-          <TabsContent value="management" className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <TabsContent value="management" className="space-y-4 md:space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle>Team Management</CardTitle>
-                  <CardDescription>Manage your team settings and members</CardDescription>
+                  <CardTitle className="text-base sm:text-lg">Team Management</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">Manage your team settings and members</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2 sm:space-y-3">
                   <Button
                     variant="outline"
-                    className="w-full justify-start"
+                    className="w-full justify-start text-xs sm:text-sm"
                     onClick={() => setIsInviteOpen(true)}
                   >
-                    <Share2 className="mr-2 h-4 w-4" />
+                    <Share2 className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     Generate Invite Code
                   </Button>
                   <Button
                     variant="outline"
-                    className="w-full justify-start"
+                    className="w-full justify-start text-xs sm:text-sm"
                     onClick={() => setIsAddMemberOpen(true)}
                   >
-                    <UserPlus className="mr-2 h-4 w-4" />
+                    <UserPlus className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     Add Team Member
                   </Button>
                   <Button
                     variant="outline"
-                    className="w-full justify-start"
+                    className="w-full justify-start text-xs sm:text-sm"
                     asChild
                   >
                     <Link href={`/dashboard/teams/${teamId}/edit`}>
-                      <Edit className="mr-2 h-4 w-4" />
+                      <Edit className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                       Edit Team Information
                     </Link>
                   </Button>
@@ -547,16 +1046,16 @@ export default function TeamDetailPage() {
 
               <Card className="border-destructive">
                 <CardHeader>
-                  <CardTitle className="text-destructive">Danger Zone</CardTitle>
-                  <CardDescription>Irreversible actions</CardDescription>
+                  <CardTitle className="text-destructive text-base sm:text-lg">Danger Zone</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">Irreversible actions</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <Button
                     variant="destructive"
-                    className="w-full"
+                    className="w-full text-xs sm:text-sm"
                     onClick={() => setShowDeleteDialog(true)}
                   >
-                    <Trash2 className="mr-2 h-4 w-4" />
+                    <Trash2 className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     Delete Team
                   </Button>
                   <p className="text-xs text-muted-foreground mt-2">
@@ -568,28 +1067,28 @@ export default function TeamDetailPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Team Statistics</CardTitle>
-                <CardDescription>Overview of your team's performance</CardDescription>
+                <CardTitle className="text-base sm:text-lg">Team Statistics</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">Overview of your team's performance</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-3 sm:space-y-4">
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Total Members</span>
-                    <span className="font-bold">{team.members?.length || 0}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground">Total Members</span>
+                    <span className="font-bold text-sm sm:text-base">{team.members?.length || 0}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Total Matches</span>
-                    <span className="font-bold">{stats.matches}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground">Total Matches</span>
+                    <span className="font-bold text-sm sm:text-base">{stats.matches}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Win Rate</span>
-                    <span className="font-bold text-green-600">
+                    <span className="text-xs sm:text-sm text-muted-foreground">Win Rate</span>
+                    <span className="font-bold text-green-600 text-sm sm:text-base">
                       {stats.matches > 0 ? Math.round((stats.wins / stats.matches) * 100) : 0}%
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Team Rank</span>
-                    <span className="font-bold">#{stats.rank || 'Unranked'}</span>
+                    <span className="text-xs sm:text-sm text-muted-foreground">Team Rank</span>
+                    <span className="font-bold text-sm sm:text-base">#{stats.rank || 'Unranked'}</span>
                   </div>
                 </div>
               </CardContent>
@@ -680,6 +1179,109 @@ export default function TeamDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Request Money Dialog */}
+      <Dialog open={isRequestMoneyOpen} onOpenChange={setIsRequestMoneyOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="text-base sm:text-lg">Request Money from Members</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              Select members and specify the amount you want to request from each
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 sm:space-y-4 py-3 sm:py-4">
+            <div className="space-y-2">
+              <Label className="text-xs sm:text-sm">Amount per Member (₹)</Label>
+              <Input
+                type="number"
+                placeholder="Enter amount"
+                value={requestAmount}
+                onChange={(e) => setRequestAmount(e.target.value)}
+                min="1"
+                className="text-sm"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs sm:text-sm">Reason (Optional)</Label>
+              <Textarea
+                placeholder="e.g., Tournament entry fee, Team equipment"
+                value={requestReason}
+                onChange={(e) => setRequestReason(e.target.value)}
+                rows={3}
+                className="text-xs sm:text-sm"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs sm:text-sm">Select Members</Label>
+              <div className="border rounded-lg p-2 sm:p-4 space-y-2 sm:space-y-3 max-h-64 overflow-y-auto">
+                {team.members
+                  ?.filter((member: any) => member.userId !== user?.id)
+                  .map((member: any) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-2 hover:bg-muted rounded gap-2"
+                    >
+                      <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                        <Checkbox
+                          checked={selectedMembers.includes(member.userId)}
+                          onCheckedChange={() => toggleMemberSelection(member.userId)}
+                        />
+                        <Avatar className="w-7 h-7 sm:w-8 sm:h-8 shrink-0">
+                          <AvatarImage src={member.user?.avatar} />
+                          <AvatarFallback className="text-xs">
+                            {member.user?.username?.substring(0, 2).toUpperCase() || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-xs sm:text-sm truncate">{member.user?.username}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Balance: ₹{member.user?.balance || 0}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="text-xs shrink-0">{member.role}</Badge>
+                    </div>
+                  ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {selectedMembers.length} member(s) selected
+              </p>
+            </div>
+
+            {selectedMembers.length > 0 && requestAmount && (
+              <div className="p-3 sm:p-4 bg-muted rounded-lg">
+                <p className="text-xs sm:text-sm font-medium">Summary</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Total to be collected: ₹{(parseFloat(requestAmount) * selectedMembers.length).toFixed(2)}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsRequestMoneyOpen(false);
+                setSelectedMembers([]);
+                setRequestAmount("");
+                setRequestReason("");
+              }}
+              className="w-full sm:w-auto text-xs sm:text-sm"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRequestMoney}
+              disabled={isSubmittingRequest || selectedMembers.length === 0 || !requestAmount}
+              className="w-full sm:w-auto text-xs sm:text-sm"
+            >
+              {isSubmittingRequest ? "Sending..." : "Send Requests"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

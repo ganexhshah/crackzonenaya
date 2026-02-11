@@ -8,6 +8,7 @@ export interface User {
   avatar?: string;
   role: string;
   isVerified: boolean;
+  balance?: number;
 }
 
 export interface LoginCredentials {
@@ -26,6 +27,8 @@ export interface AuthResponse {
   token: string;
   user: User;
   message?: string;
+  isNewUser?: boolean;
+  hasProfile?: boolean;
 }
 
 export const authService = {
@@ -40,6 +43,15 @@ export const authService = {
 
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const response = await api.post<AuthResponse>('/auth/login', credentials);
+    if (response.token) {
+      localStorage.setItem('token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
+    }
+    return response;
+  },
+
+  async googleLogin(credential: string): Promise<AuthResponse> {
+    const response = await api.post<AuthResponse>('/auth/google', { credential });
     if (response.token) {
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(response.user));

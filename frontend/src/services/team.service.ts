@@ -8,6 +8,7 @@ export interface Team {
   description?: string;
   ownerId: string;
   isActive: boolean;
+  balance?: number;
   createdAt: string;
   updatedAt: string;
   owner: {
@@ -31,6 +32,7 @@ export interface TeamMember {
     id: string;
     username: string;
     avatar?: string;
+    balance?: number;
   };
 }
 
@@ -52,6 +54,14 @@ export const teamService = {
 
   async getMyTeams(): Promise<Team[]> {
     return api.get('/teams/my-teams');
+  },
+
+  async getUserTeams(): Promise<Team[]> {
+    return api.get('/teams/my-teams');
+  },
+
+  async getTeam(id: string): Promise<Team> {
+    return api.get(`/teams/${id}`);
   },
 
   async getTeamById(id: string): Promise<Team> {
