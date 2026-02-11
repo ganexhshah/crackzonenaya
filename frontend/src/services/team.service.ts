@@ -1,0 +1,84 @@
+import { api } from '@/lib/api';
+
+export interface Team {
+  id: string;
+  name: string;
+  tag: string;
+  logo?: string;
+  description?: string;
+  ownerId: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  owner: {
+    id: string;
+    username: string;
+    avatar?: string;
+  };
+  members: TeamMember[];
+  _count?: {
+    members: number;
+  };
+}
+
+export interface TeamMember {
+  id: string;
+  teamId: string;
+  userId: string;
+  role: 'OWNER' | 'CAPTAIN' | 'MEMBER';
+  joinedAt: string;
+  user: {
+    id: string;
+    username: string;
+    avatar?: string;
+  };
+}
+
+export interface CreateTeamData {
+  name: string;
+  tag: string;
+  description?: string;
+}
+
+export interface UpdateTeamData {
+  name?: string;
+  description?: string;
+}
+
+export const teamService = {
+  async getAllTeams(): Promise<Team[]> {
+    return api.get('/teams');
+  },
+
+  async getMyTeams(): Promise<Team[]> {
+    return api.get('/teams/my-teams');
+  },
+
+  async getTeamById(id: string): Promise<Team> {
+    return api.get(`/teams/${id}`);
+  },
+
+  async createTeam(data: CreateTeamData): Promise<Team> {
+    return api.post('/teams', data);
+  },
+
+  async updateTeam(id: string, data: UpdateTeamData): Promise<Team> {
+    return api.put(`/teams/${id}`, data);
+  },
+
+  async uploadLogo(id: string, file: File): Promise<{ logo: string }> {
+    return api.uploadFile(`/teams/${id}/logo`, file, 'logo');
+  },
+
+  async addMember(teamId: string, userId: string): Promise<TeamMember> {
+    return api.post(`/teams/${teamId}/members`, { userId });
+  },
+
+  async removeMember(teamId: string, userId: string): Promise<{ message: string }> {
+    return api.delete(`/teams/${teamId}/members/${userId}`);
+  },
+
+  async deleteTeam(id: string): Promise<{ message: string }> {
+    return api.delete(`/teams/${id}`);
+  },
+};

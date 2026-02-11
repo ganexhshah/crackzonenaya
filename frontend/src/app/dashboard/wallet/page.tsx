@@ -1,0 +1,774 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+  Wallet,
+  Plus,
+  Minus,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Eye,
+  Upload,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  DollarSign,
+  AlertCircle,
+} from "lucide-react";
+import { walletService, WalletData, Transaction } from "@/services/wallet.service";
+import { paymentMethodService, PaymentMethod } from "@/services/payment-method.service";
+import { toast } from "sonner";
+
+export default function WalletPage() {
+  const [walletData, setWalletData] = useState<WalletData>({
+    balance: 0,
+    currency: "रु",
+    pendingAmount: 0,
+  });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [balanceLoading, setBalanceLoading] = useState(false);
+  const [isAddMoneyOpen, setIsAddMoneyOpen] = useState(false);
+  const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
+  const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
+
+  useEffect(() => {
+    fetchWalletData();
+  }, []);
+
+  const fetchWalletData = async () => {
+    try {
+      const [wallet, txns] = await Promise.all([
+        walletService.getWallet(),
+        walletService.getTransactions(),
+      ]);
+      setWalletData(wallet);
+      setTransactions(txns);
+    } catch (error: any) {
+      console.error('Failed to fetch wallet data:', error);
+      toast.error('Failed to load wallet data');
+    }
+  };
+
+  const refreshBalance = async () => {
+    try {
+      setBalanceLoading(true);
+      const wallet = await walletService.getWallet();
+      setWalletData(wallet);
+    } catch (error: any) {
+      console.error('Failed to refresh balance:', error);
+      toast.error('Failed to refresh balance');
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  return (
+    <div className="p-4 md:p-6 lg:p-8 space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl md:text-3xl font-bold">Wallet</h1>
+        <p className="text-muted-foreground mt-1">
+          Manage your funds and transactions
+        </p>
+      </div>
+
+      {/* Balance Card */}
+      <Card className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-0">
+        <CardContent className="p-6 md:p-8">
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <p className="text-white/80 text-sm mb-2">Available Balance</p>
+              <div className="flex items-baseline gap-2">
+                {balanceLoading ? (
+                  <div className="h-12 w-48 bg-white/20 rounded animate-pulse" />
+                ) : (
+                  <span className="text-4xl md:text-5xl font-bold">
+                    {walletData.currency} {walletData.balance.toFixed(2)}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Wallet className="h-12 w-12 text-white/50" />
+          </div>
+
+          {walletData.pendingAmount > 0 && (
+            <div className="flex items-center gap-2 text-sm text-white/80 mb-6">
+              <Clock className="h-4 w-4" />
+              {balanceLoading ? (
+                <div className="h-4 w-32 bg-white/20 rounded animate-pulse" />
+              ) : (
+                <span>Pending: {walletData.currency} {walletData.pendingAmount}</span>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <Dialog open={isAddMoneyOpen} onOpenChange={setIsAddMoneyOpen}>
+              <DialogTrigger asChild>
+                <Button variant="secondary" className="w-full">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Money
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <AddMoneyDialog 
+                  onClose={() => {
+                    setIsAddMoneyOpen(false);
+                    refreshBalance();
+                  }} 
+                />
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={isWithdrawOpen} onOpenChange={setIsWithdrawOpen}>
+              <DialogTrigger asChild>
+                <Button variant="secondary" className="w-full">
+                  <Minus className="mr-2 h-4 w-4" />
+                  Withdraw
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <WithdrawDialog 
+                  onClose={() => {
+                    setIsWithdrawOpen(false);
+                    refreshBalance();
+                  }}
+                  walletBalance={walletData.balance}
+                />
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Transactions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Transaction History</CardTitle>
+          <CardDescription>View all your wallet transactions</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="all">
+            <TabsList className="grid w-full grid-cols-4 mb-6">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="deposit">Deposits</TabsTrigger>
+              <TabsTrigger value="withdrawal">Withdrawals</TabsTrigger>
+              <TabsTrigger value="payment">Payments</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="all" className="space-y-3">
+              {transactions.map((transaction) => (
+                <TransactionCard
+                  key={transaction.id}
+                  transaction={transaction}
+                  onViewReceipt={setSelectedReceipt}
+                  formatDate={formatDate}
+                />
+              ))}
+            </TabsContent>
+
+            <TabsContent value="deposit" className="space-y-3">
+              {transactions
+                .filter((t) => t.type === "deposit")
+                .map((transaction) => (
+                  <TransactionCard
+                    key={transaction.id}
+                    transaction={transaction}
+                    onViewReceipt={setSelectedReceipt}
+                    formatDate={formatDate}
+                  />
+                ))}
+            </TabsContent>
+
+            <TabsContent value="withdrawal" className="space-y-3">
+              {transactions
+                .filter((t) => t.type === "withdrawal")
+                .map((transaction) => (
+                  <TransactionCard
+                    key={transaction.id}
+                    transaction={transaction}
+                    onViewReceipt={setSelectedReceipt}
+                    formatDate={formatDate}
+                  />
+                ))}
+            </TabsContent>
+
+            <TabsContent value="payment" className="space-y-3">
+              {transactions
+                .filter((t) => t.type === "payment")
+                .map((transaction) => (
+                  <TransactionCard
+                    key={transaction.id}
+                    transaction={transaction}
+                    onViewReceipt={setSelectedReceipt}
+                    formatDate={formatDate}
+                  />
+                ))}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Receipt Preview Dialog */}
+      <Dialog open={!!selectedReceipt} onOpenChange={() => setSelectedReceipt(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Transaction Receipt</DialogTitle>
+            <DialogDescription>Transaction ID: {selectedReceipt?.reference}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Type</p>
+                <p className="font-medium capitalize">{selectedReceipt?.type}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Amount</p>
+                <p className="font-medium">रु {Math.abs(selectedReceipt?.amount || 0)}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Method</p>
+                <p className="font-medium">{selectedReceipt?.method}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Status</p>
+                <Badge
+                  variant={
+                    selectedReceipt?.status === "Verified"
+                      ? "default"
+                      : selectedReceipt?.status === "Pending"
+                      ? "secondary"
+                      : "destructive"
+                  }
+                >
+                  {selectedReceipt?.status}
+                </Badge>
+              </div>
+              <div className="col-span-2">
+                <p className="text-muted-foreground">Date</p>
+                <p className="font-medium">{formatDate(selectedReceipt?.date)}</p>
+              </div>
+            </div>
+
+            {/* Payment Screenshot */}
+            {selectedReceipt?.receiptUrl && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Payment Screenshot</p>
+                <div className="border rounded-lg overflow-hidden bg-muted/50">
+                  <img
+                    src={selectedReceipt.receiptUrl}
+                    alt="Payment Receipt"
+                    className="w-full h-auto max-h-96 object-contain"
+                  />
+                </div>
+                <a
+                  href={selectedReceipt.receiptUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  <Upload className="w-4 h-4" />
+                  Open in new tab
+                </a>
+              </div>
+            )}
+
+            {/* Report Issue */}
+            {selectedReceipt?.status === "Pending" && (
+              <div className="pt-4 border-t">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    toast.info("Report feature coming soon. Please contact support for urgent issues.");
+                  }}
+                >
+                  <AlertCircle className="w-4 h-4 mr-2" />
+                  Report an Issue
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function TransactionCard({ transaction, onViewReceipt, formatDate }: any) {
+  const isDeposit = transaction.type === "deposit";
+  const isWithdrawal = transaction.type === "withdrawal";
+  const isPayment = transaction.type === "payment";
+
+  return (
+    <div className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+      <div className="flex items-center gap-3">
+        <div
+          className={`w-10 h-10 rounded-full flex items-center justify-center ${
+            isDeposit
+              ? "bg-green-100 dark:bg-green-900"
+              : isWithdrawal
+              ? "bg-orange-100 dark:bg-orange-900"
+              : "bg-blue-100 dark:bg-blue-900"
+          }`}
+        >
+          {isDeposit ? (
+            <ArrowDownLeft className="h-5 w-5 text-green-600 dark:text-green-400" />
+          ) : isWithdrawal ? (
+            <ArrowUpRight className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+          ) : (
+            <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          )}
+        </div>
+        <div>
+          <p className="font-medium capitalize">
+            {transaction.description || transaction.type}
+          </p>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>{transaction.method}</span>
+            <span>•</span>
+            <span>{formatDate(transaction.date)}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-right flex items-center gap-3">
+        <div>
+          <p
+            className={`font-semibold ${
+              isDeposit ? "text-green-600" : isPayment ? "text-red-600" : ""
+            }`}
+          >
+            {isDeposit ? "+" : ""}
+            {transaction.amount > 0 ? transaction.amount : Math.abs(transaction.amount)} रु
+          </p>
+          <Badge
+            variant={
+              transaction.status === "Verified"
+                ? "default"
+                : transaction.status === "Pending"
+                ? "secondary"
+                : "destructive"
+            }
+            className="text-xs"
+          >
+            {transaction.status === "Verified" && <CheckCircle2 className="h-3 w-3 mr-1" />}
+            {transaction.status === "Pending" && <Clock className="h-3 w-3 mr-1" />}
+            {transaction.status === "Failed" && <XCircle className="h-3 w-3 mr-1" />}
+            {transaction.status}
+          </Badge>
+        </div>
+        {transaction.transactionId && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onViewReceipt(transaction)}
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AddMoneyDialog({ onClose }: { onClose: () => void }) {
+  const [amount, setAmount] = useState("");
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [transactionId, setTransactionId] = useState("");
+  const [step, setStep] = useState<"amount" | "payment" | "success">("amount");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetchPaymentMethods();
+  }, []);
+
+  const fetchPaymentMethods = async () => {
+    try {
+      const methods = await paymentMethodService.getActivePaymentMethods();
+      setPaymentMethods(methods);
+    } catch (error: any) {
+      console.error('Failed to fetch payment methods:', error);
+      toast.error('Failed to load payment methods');
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please upload an image file');
+        return;
+      }
+
+      // Validate file size (5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('File size must be less than 5MB');
+        return;
+      }
+
+      setScreenshot(file);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!screenshot || !transactionId) {
+      toast.error("Please upload screenshot and enter transaction ID");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await walletService.submitDeposit({
+        amount: Number(amount),
+        method: selectedMethod?.name || '',
+        transactionId,
+        screenshot,
+      });
+      setStep("success");
+      toast.success("Payment submitted successfully!");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to submit payment");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (step === "success") {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Payment Submitted!</DialogTitle>
+          <DialogDescription>Your payment is being verified</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-6 py-4">
+          <div className="flex justify-center">
+            <div className="w-16 h-16 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8 text-green-600 dark:text-green-400" />
+            </div>
+          </div>
+          <div className="text-center space-y-2">
+            <p className="font-medium">Payment verification in progress</p>
+            <p className="text-sm text-muted-foreground">
+              Your funds will be added to your wallet once verified (usually within 24 hours)
+            </p>
+          </div>
+          <Button className="w-full" onClick={onClose}>
+            Done
+          </Button>
+        </div>
+      </>
+    );
+  }
+
+  if (step === "payment" && selectedMethod) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Complete Payment - {selectedMethod.name}</DialogTitle>
+          <DialogDescription>Amount: रु {amount}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4 max-h-[70vh] overflow-y-auto">
+          {/* Payment Method Info */}
+          <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Payment Method</span>
+              <span className="font-medium">{selectedMethod.name}</span>
+            </div>
+            {selectedMethod.upiId && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">UPI ID</span>
+                <span className="font-mono text-sm">{selectedMethod.upiId}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Amount</span>
+              <span className="font-bold text-lg">रु {amount}</span>
+            </div>
+          </div>
+
+          {/* QR Code */}
+          {selectedMethod.qrCodeUrl && (
+            <div className="border-2 border-dashed rounded-lg p-6 text-center bg-white dark:bg-muted">
+              <img
+                src={selectedMethod.qrCodeUrl}
+                alt={`${selectedMethod.name} QR Code`}
+                className="w-64 h-64 mx-auto object-contain rounded-lg"
+              />
+              <p className="text-sm font-medium mt-4">Scan to pay रु {amount}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Use your {selectedMethod.name} app to scan and pay
+              </p>
+            </div>
+          )}
+
+          <Separator />
+
+          {/* Upload Screenshot */}
+          <div className="space-y-2">
+            <Label>Upload Payment Screenshot *</Label>
+            {screenshot ? (
+              <div className="space-y-2">
+                <div className="border rounded-lg p-4 bg-muted/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{screenshot.name}</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setScreenshot(null)}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {(screenshot.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  id="screenshot"
+                />
+                <label htmlFor="screenshot" className="cursor-pointer">
+                  <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm font-medium">Click to upload</p>
+                  <p className="text-xs text-muted-foreground mt-1">PNG, JPG (Max 5MB)</p>
+                </label>
+              </div>
+            )}
+          </div>
+
+          {/* Transaction ID */}
+          <div className="space-y-2">
+            <Label htmlFor="txnId">Transaction ID *</Label>
+            <Input
+              id="txnId"
+              placeholder="Enter transaction ID from payment app"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Find this in your payment app after completing the transaction
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={() => setStep("amount")}>
+              Back
+            </Button>
+            <Button 
+              className="flex-1" 
+              onClick={handleSubmit} 
+              disabled={submitting || !screenshot || !transactionId}
+            >
+              {submitting ? "Submitting..." : "Submit Payment"}
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Add Money</DialogTitle>
+        <DialogDescription>Choose amount and payment method</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="space-y-2">
+          <Label htmlFor="amount">Amount (रु)</Label>
+          <Input
+            id="amount"
+            type="number"
+            placeholder="Enter amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            min="1"
+          />
+          <p className="text-xs text-muted-foreground">
+            Minimum deposit: रु 100
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Payment Method</Label>
+          {paymentMethods.length > 0 ? (
+            <div className="grid grid-cols-2 gap-3">
+              {paymentMethods.filter(m => m.isActive).map((method) => (
+                <button
+                  key={method.id}
+                  onClick={() => setSelectedMethod(method)}
+                  className={`p-4 border-2 rounded-lg transition-all hover:scale-105 ${
+                    selectedMethod?.id === method.id
+                      ? "border-primary bg-primary/10 shadow-md"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  <p className="font-semibold">{method.name}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{method.type}</p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center p-8 border-2 border-dashed rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                No payment methods available. Please contact admin.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <Button
+          className="w-full"
+          onClick={() => setStep("payment")}
+          disabled={!amount || Number(amount) < 100 || !selectedMethod}
+        >
+          Continue to Payment
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function WithdrawDialog({ onClose, walletBalance }: { onClose: () => void; walletBalance: number }) {
+  const [amount, setAmount] = useState("");
+  const [method, setMethod] = useState<"esewa" | "khalti">("esewa");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!amount || !accountNumber) {
+      toast.error("Please fill all fields");
+      return;
+    }
+
+    if (Number(amount) > walletBalance) {
+      toast.error("Insufficient balance");
+      return;
+    }
+
+    if (Number(amount) < 100) {
+      toast.error("Minimum withdrawal amount is रु 100");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await walletService.submitWithdrawal({
+        amount: Number(amount),
+        method,
+        accountNumber,
+      });
+      toast.success("Withdrawal request submitted!");
+      onClose();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to submit withdrawal request");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Withdraw Money</DialogTitle>
+        <DialogDescription>
+          Available Balance: रु {walletBalance.toFixed(2)}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="space-y-2">
+          <Label htmlFor="withdrawAmount">Amount (रु)</Label>
+          <Input
+            id="withdrawAmount"
+            type="number"
+            placeholder="Enter amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            max={walletBalance}
+          />
+          <p className="text-xs text-muted-foreground">
+            Minimum withdrawal: रु 100
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Withdrawal Method</Label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => setMethod("esewa")}
+              className={`p-4 border-2 rounded-lg transition-all ${
+                method === "esewa"
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/50"
+              }`}
+            >
+              <p className="font-semibold">eSewa</p>
+            </button>
+            <button
+              onClick={() => setMethod("khalti")}
+              className={`p-4 border-2 rounded-lg transition-all ${
+                method === "khalti"
+                  ? "border-primary bg-primary/10"
+                  : "border-border hover:border-primary/50"
+              }`}
+            >
+              <p className="font-semibold">Khalti</p>
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="accountNumber">
+            {method === "esewa" ? "eSewa" : "Khalti"} Number
+          </Label>
+          <Input
+            id="accountNumber"
+            placeholder="Enter your account number"
+            value={accountNumber}
+            onChange={(e) => setAccountNumber(e.target.value)}
+          />
+        </div>
+
+        <div className="bg-yellow-50 dark:bg-yellow-950 p-3 rounded-lg">
+          <p className="text-sm text-yellow-900 dark:text-yellow-100">
+            <strong>Note:</strong> Withdrawal requests are processed within 24-48 hours
+          </p>
+        </div>
+
+        <Button className="w-full" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? "Submitting..." : "Submit Withdrawal Request"}
+        </Button>
+      </div>
+    </>
+  );
+}
