@@ -49,7 +49,7 @@ export interface ScrimPlayer {
 export interface ScrimConfig {
   basicInformation: {
     scrimCode?: string;
-    scrimType: 'SOLO' | 'SQUAD';
+    scrimType: 'SOLO' | 'DUO' | 'SQUAD';
     gameMode: 'BATTLE_ROYALE' | 'CLASH_SQUAD';
     mapSelection: 'BERMUDA' | 'PURGATORY' | 'ALPINE' | 'RANDOM';
     organizerName?: string;
