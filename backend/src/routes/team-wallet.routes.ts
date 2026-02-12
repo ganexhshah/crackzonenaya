@@ -68,6 +68,16 @@ router.post('/:teamId/request-money', authenticate, async (req: any, res) => {
   try {
     const { teamId } = req.params;
     const { memberIds, amountPerMember, reason } = req.body;
+    const parsedAmount = Number(amountPerMember);
+
+    if (!Array.isArray(memberIds) || memberIds.length === 0) {
+      return res.status(400).json({ error: 'At least one member is required' });
+    }
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ error: 'Amount per member must be a positive number' });
+    }
+
+    console.log('Money request received:', { teamId, memberIds, amountPerMember, reason, userId: req.user.id });
 
     // Check if user is team owner/leader
     const team = await prisma.team.findUnique({
@@ -84,10 +94,12 @@ router.post('/:teamId/request-money', authenticate, async (req: any, res) => {
     });
 
     if (!team) {
+      console.log('Team not found:', teamId);
       return res.status(404).json({ error: 'Team not found' });
     }
 
     if (team.ownerId !== req.user.id) {
+      console.log('User is not team owner:', { userId: req.user.id, ownerId: team.ownerId });
       return res.status(403).json({ error: 'Only team leader can request money' });
     }
 
@@ -96,28 +108,13 @@ router.post('/:teamId/request-money', authenticate, async (req: any, res) => {
       memberIds.includes(m.userId) && m.userId !== req.user.id
     );
 
+    console.log('Valid members:', validMembers.length);
+
     if (validMembers.length === 0) {
       return res.status(400).json({ error: 'No valid members selected' });
     }
 
-    // Check if members have sufficient balance
-    const insufficientMembers = validMembers.filter(m => 
-      m.user.balance < amountPerMember
-    );
-
-    if (insufficientMembers.length > 0) {
-      return res.status(400).json({ 
-        error: 'Some members have insufficient balance',
-        insufficientMembers: insufficientMembers.map(m => ({
-          id: m.user.id,
-          username: m.user.username,
-          balance: m.user.balance,
-          required: amountPerMember,
-        })),
-      });
-    }
-
-    // Create money requests
+    // Create money requests (don't check balance, let members decide)
     const requests = await Promise.all(
       validMembers.map(member =>
         prisma.teamMoneyRequest.create({
@@ -125,19 +122,21 @@ router.post('/:teamId/request-money', authenticate, async (req: any, res) => {
             teamId,
             requestedBy: req.user.id,
             requestedFrom: member.userId,
-            amount: amountPerMember,
+            amount: parsedAmount,
             reason: reason || 'Team entry fee contribution',
           },
         })
       )
     );
 
+    console.log('Money requests created:', requests.length);
+
     res.json({
       message: 'Money requests sent successfully',
       requests,
     });
   } catch (error) {
-    console.error(error);
+    console.error('Money request error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -194,30 +193,45 @@ router.post('/requests/:requestId/respond', authenticate, async (req: any, res) 
     }
 
     if (action === 'approve') {
-      // Check user balance
-      const user = await prisma.user.findUnique({
-        where: { id: req.user.id },
-      });
+      const result = await prisma.$transaction(async (tx) => {
+        const locked = await tx.teamMoneyRequest.updateMany({
+          where: {
+            id: requestId,
+            requestedFrom: req.user.id,
+            status: 'PENDING',
+          },
+          data: {
+            status: 'APPROVED',
+            respondedAt: new Date(),
+          },
+        });
 
-      if (!user || user.balance < request.amount) {
-        return res.status(400).json({ error: 'Insufficient balance' });
-      }
+        if (locked.count !== 1) {
+          return { error: 'ALREADY_PROCESSED' as const };
+        }
 
-      // Process transaction
-      await prisma.$transaction(async (tx) => {
-        // Deduct from user
-        await tx.user.update({
-          where: { id: req.user.id },
+        const userUpdated = await tx.user.updateMany({
+          where: {
+            id: req.user.id,
+            balance: { gte: request.amount },
+          },
           data: { balance: { decrement: request.amount } },
         });
 
-        // Add to team wallet
+        if (userUpdated.count !== 1) {
+          // Revert request status if balance check failed
+          await tx.teamMoneyRequest.update({
+            where: { id: requestId },
+            data: { status: 'PENDING', respondedAt: null },
+          });
+          return { error: 'INSUFFICIENT_BALANCE' as const };
+        }
+
         await tx.team.update({
           where: { id: request.teamId },
           data: { balance: { increment: request.amount } },
         });
 
-        // Create user transaction
         await tx.transaction.create({
           data: {
             userId: req.user.id,
@@ -229,7 +243,6 @@ router.post('/requests/:requestId/respond', authenticate, async (req: any, res) 
           },
         });
 
-        // Create team transaction
         await tx.teamTransaction.create({
           data: {
             teamId: request.teamId,
@@ -241,15 +254,17 @@ router.post('/requests/:requestId/respond', authenticate, async (req: any, res) 
           },
         });
 
-        // Update request status
-        await tx.teamMoneyRequest.update({
-          where: { id: requestId },
-          data: {
-            status: 'APPROVED',
-            respondedAt: new Date(),
-          },
-        });
+        return { ok: true as const };
       });
+
+      if ('error' in result) {
+        if (result.error === 'ALREADY_PROCESSED') {
+          return res.status(409).json({ error: 'Request already processed' });
+        }
+        if (result.error === 'INSUFFICIENT_BALANCE') {
+          return res.status(400).json({ error: 'Insufficient balance' });
+        }
+      }
 
       res.json({ message: 'Money transferred to team wallet successfully' });
     } else if (action === 'reject') {

@@ -8,17 +8,29 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar, Clock, Swords, Users } from "lucide-react";
 import { scrimService, Scrim } from "@/services/scrim.service";
 import { toast } from "sonner";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const SCRIMS_PAGE_CACHE_KEY = "dashboard:scrims:list";
+const SCRIMS_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 
 export default function DashboardScrimsPage() {
   const [scrims, setScrims] = useState<Scrim[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cached = getCachedPageData<Scrim[]>(SCRIMS_PAGE_CACHE_KEY, SCRIMS_PAGE_CACHE_TTL_MS);
+    if (cached) {
+      setScrims(cached);
+      setLoading(false);
+    }
+
     (async () => {
       try {
-        setLoading(true);
+        if (!cached) setLoading(true);
         const data = await scrimService.getPublicScrims();
-        setScrims(Array.isArray(data) ? data : []);
+        const nextData = Array.isArray(data) ? data : [];
+        setScrims(nextData);
+        setCachedPageData(SCRIMS_PAGE_CACHE_KEY, nextData);
       } catch (error: any) {
         toast.error(error?.message || "Failed to load scrims");
         setScrims([]);

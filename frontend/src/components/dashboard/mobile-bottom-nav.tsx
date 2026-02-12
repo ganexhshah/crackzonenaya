@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Trophy, Users, Calendar, User, Wallet } from "lucide-react";
+import { Home, Trophy, Users, Calendar, User, Wallet, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +14,11 @@ const navItems = [
     href: "/dashboard",
   },
   {
+    title: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
+  },
+  {
     title: "Tournaments",
     icon: Trophy,
     href: "/dashboard/tournaments",
@@ -22,11 +27,6 @@ const navItems = [
     title: "Wallet",
     icon: Wallet,
     href: "/dashboard/wallet",
-  },
-  {
-    title: "Matches",
-    icon: Calendar,
-    href: "/dashboard/matches",
   },
 ];
 

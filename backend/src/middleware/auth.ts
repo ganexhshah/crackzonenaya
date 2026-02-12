@@ -23,11 +23,18 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
         username: true,
         role: true,
         isVerified: true,
+        status: true,
       },
     });
 
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
+    }
+    if (!user.isVerified) {
+      return res.status(403).json({ error: 'Email verification required' });
+    }
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Account is not active' });
     }
 
     req.user = user;

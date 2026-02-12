@@ -6,10 +6,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trophy, Calendar, Users, DollarSign, Clock, MapPin } from "lucide-react";
+import { Trophy, Calendar, Users, DollarSign, Clock, MapPin, AlertTriangle } from "lucide-react";
 import { api } from "@/lib/api";
 import { scrimService, Scrim } from "@/services/scrim.service";
 import { toast } from "sonner";
+import { ReportDialog } from "@/components/report/report-dialog";
+import { customRoomService, CustomRoom } from "@/services/custom-room.service";
+import { useAuth } from "@/contexts/AuthContext";
+import { useRouter } from "next/navigation";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { CustomRoomDetailsDialog } from "@/components/custom-rooms/custom-room-details-dialog";
+
+const TOURNAMENTS_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
+let tournamentsPageCache:
+  | {
+      timestamp: number;
+      tournaments: Tournament[];
+      scrims: Scrim[];
+    }
+  | null = null;
 
 interface Tournament {
   id: string;
@@ -29,17 +53,49 @@ interface Tournament {
 }
 
 export default function TournamentsPage() {
+  const router = useRouter();
+  const { user, refreshUser } = useAuth();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [scrims, setScrims] = useState<Scrim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openRoomsLoading, setOpenRoomsLoading] = useState(true);
+  const [openRooms, setOpenRooms] = useState<CustomRoom[]>([]);
+  const [joinRoomTarget, setJoinRoomTarget] = useState<CustomRoom | null>(null);
+  const [joinedRoomIds, setJoinedRoomIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetchData();
+    const now = Date.now();
+    const hasFreshCache = tournamentsPageCache && now - tournamentsPageCache.timestamp < TOURNAMENTS_PAGE_CACHE_TTL_MS;
+
+    if (hasFreshCache) {
+      setTournaments(tournamentsPageCache!.tournaments);
+      setScrims(tournamentsPageCache!.scrims);
+      setLoading(false);
+      void fetchData({ silent: true });
+      return;
+    }
+
+    void fetchData();
   }, []);
 
-  const fetchData = async () => {
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setOpenRoomsLoading(true);
+        const rooms = await customRoomService.listOpenRooms();
+        setOpenRooms(Array.isArray(rooms) ? rooms : []);
+      } catch (e) {
+        setOpenRooms([]);
+      } finally {
+        setOpenRoomsLoading(false);
+      }
+    };
+    void load();
+  }, []);
+
+  const fetchData = async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) setLoading(true);
       const [tournamentData, scrimData] = await Promise.all([
         api.get('/tournaments'),
         scrimService.getPublicScrims(),
@@ -51,7 +107,13 @@ export default function TournamentsPage() {
       );
 
       setTournaments(validTournaments);
-      setScrims(Array.isArray(scrimData) ? scrimData : []);
+      const nextScrims = Array.isArray(scrimData) ? scrimData : [];
+      setScrims(nextScrims);
+      tournamentsPageCache = {
+        timestamp: Date.now(),
+        tournaments: validTournaments,
+        scrims: nextScrims,
+      };
     } catch (error: any) {
       console.error('Failed to fetch tournaments/scrims:', error);
       toast.error('Failed to load tournaments/scrims');
@@ -78,6 +140,107 @@ export default function TournamentsPage() {
         <h1 className="text-2xl md:text-3xl font-bold">Tournaments & Scrims</h1>
         <p className="text-muted-foreground mt-1">Browse and join public matches</p>
       </div>
+
+      {/* Open Custom Rooms */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Open Custom Rooms</CardTitle>
+          <CardDescription>Join rooms created by other players</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {openRoomsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : openRooms.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No open rooms right now.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {openRooms.slice(0, 6).map((r) => (
+                <div key={r.id} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">
+                        {r.type === "CUSTOM_ROOM" ? "Custom Room" : "Lone Wolf"} • {r.rounds} rounds
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        By {r.creator?.username || "Player"} • Entry ₹{Number(r.entryFee || 0).toFixed(0)} • Payout ₹{Number(r.payout || 0).toFixed(0)}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <Badge variant="outline">{r.teamSize}</Badge>
+                        <Badge variant="outline">{r.status}</Badge>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <CustomRoomDetailsDialog
+                        room={r}
+                        trigger={<Button size="sm" variant="outline">Details</Button>}
+                      />
+                      {joinedRoomIds.has(r.id) ? (
+                        <Button size="sm" asChild>
+                          <Link href="/dashboard/custom-matches">Manage</Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => setJoinRoomTarget(r)}>
+                          Join
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={!!joinRoomTarget} onOpenChange={(o) => !o && setJoinRoomTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Join Room</AlertDialogTitle>
+            <AlertDialogDescription>
+              Joining will deduct the entry fee from your wallet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Wallet Balance</span>
+              <span className="font-semibold">₹{Number(user?.balance || 0).toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-muted-foreground">Entry Fee</span>
+              <span className="font-semibold text-destructive">-₹{Number(joinRoomTarget?.entryFee || 0).toFixed(2)}</span>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!joinRoomTarget) return;
+                const fee = Number(joinRoomTarget.entryFee || 0);
+                const bal = Number(user?.balance || 0);
+                if (fee > 0 && bal < fee) {
+                  toast.error("Insufficient balance. Please add money to your wallet.");
+                  setJoinRoomTarget(null);
+                  return;
+                }
+                try {
+                  const targetId = joinRoomTarget.id;
+                  await customRoomService.joinRoom(joinRoomTarget.id);
+                  toast.success(`Joined room. ₹${fee.toFixed(2)} deducted from your wallet.`);
+                  setJoinedRoomIds((prev) => new Set(prev).add(targetId));
+                  setOpenRooms((prev) => prev.filter((x) => x.id !== targetId));
+                  await refreshUser();
+                  setJoinRoomTarget(null);
+                  router.push("/dashboard/custom-matches");
+                } catch (e: any) {
+                  toast.error(e?.message || "Failed to join");
+                }
+              }}
+            >
+              Confirm & Join
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -111,7 +274,16 @@ export default function TournamentsPage() {
                       {tournament.map && <div className="flex items-center gap-2 text-sm text-muted-foreground"><MapPin className="h-4 w-4" /><span>{tournament.map}</span></div>}
                       <div className="flex items-center gap-2 text-sm text-muted-foreground"><Users className="h-4 w-4" /><span>{tournament.currentTeams || 0}/{tournament.maxTeams} Teams</span></div>
                       <div className="flex items-center gap-2 text-sm"><DollarSign className="h-4 w-4 text-muted-foreground" /><span className="font-semibold">रु {tournament.prizePool} Prize Pool</span></div>
-                      <Button className="w-full mt-4" asChild><Link href={`/dashboard/tournaments/${tournament.id}/register`}>Register Now</Link></Button>
+                      <div className="flex gap-2 mt-4">
+                        <Button className="flex-1" asChild><Link href={`/dashboard/tournaments/${tournament.id}/register`}>Register Now</Link></Button>
+                        <ReportDialog
+                          trigger={
+                            <Button variant="outline" size="icon">
+                              <AlertTriangle className="h-4 w-4 text-red-600" />
+                            </Button>
+                          }
+                        />
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -138,7 +310,16 @@ export default function TournamentsPage() {
                       <div className="flex items-center gap-2 text-sm text-muted-foreground"><Calendar className="h-4 w-4" /><span>{formatDate(scrim.scheduledAt)}</span></div>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground"><Clock className="h-4 w-4" /><span>{formatTime(scrim.scheduledAt)}</span></div>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground"><Users className="h-4 w-4" /><span>{scrim._count?.players || 0} joined</span></div>
-                      <Button className="w-full mt-4" asChild><Link href="/dashboard/scrims">View Scrims</Link></Button>
+                      <div className="flex gap-2 mt-4">
+                        <Button className="flex-1" asChild><Link href="/dashboard/scrims">View Scrims</Link></Button>
+                        <ReportDialog
+                          trigger={
+                            <Button variant="outline" size="icon">
+                              <AlertTriangle className="h-4 w-4 text-red-600" />
+                            </Button>
+                          }
+                        />
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

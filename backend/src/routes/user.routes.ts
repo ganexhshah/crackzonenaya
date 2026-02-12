@@ -6,6 +6,70 @@ import { uploadToCloudinary } from '../utils/cloudinary';
 
 const router = Router();
 
+// Get all users (for team invitations)
+router.get('/all', authenticate, async (req: any, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        id: {
+          not: req.user.id, // Exclude current user
+        },
+      },
+      select: {
+        id: true,
+        username: true,
+        gameName: true,
+        gameId: true,
+        avatar: true,
+      },
+      orderBy: {
+        username: 'asc',
+      },
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('Get all users error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Search users by email or username
+router.get('/search', authenticate, async (req: any, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+    if (query.trim().length < 2) {
+      return res.status(400).json({ error: 'Search query must be at least 2 characters' });
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        OR: [
+          { username: { contains: query, mode: 'insensitive' } },
+          { gameName: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        username: true,
+        gameName: true,
+        gameId: true,
+        avatar: true,
+      },
+      take: 10,
+    });
+
+    res.json(users);
+  } catch (error) {
+    console.error('User search error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get user profile (current user)
 router.get('/profile', authenticate, async (req: any, res) => {
   try {
@@ -56,7 +120,6 @@ router.get('/:id', authenticate, async (req: any, res) => {
       select: {
         id: true,
         username: true,
-        email: true,
         avatar: true,
         gameName: true,
         gameId: true,

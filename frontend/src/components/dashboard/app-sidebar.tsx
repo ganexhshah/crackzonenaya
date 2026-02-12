@@ -13,6 +13,9 @@ import {
   Gamepad2,
   LogOut,
   Wallet,
+  Bell,
+  HelpCircle,
+  Swords,
 } from "lucide-react";
 import {
   Sidebar,
@@ -37,6 +40,11 @@ const menuItems = [
     href: "/dashboard",
   },
   {
+    title: "Notifications",
+    icon: Bell,
+    href: "/dashboard/notifications",
+  },
+  {
     title: "Tournaments",
     icon: Trophy,
     href: "/dashboard/tournaments",
@@ -57,6 +65,11 @@ const menuItems = [
     href: "/dashboard/matches",
   },
   {
+    title: "Custom Matches",
+    icon: Swords,
+    href: "/dashboard/custom-matches",
+  },
+  {
     title: "Statistics",
     icon: BarChart3,
     href: "/dashboard/stats",
@@ -70,6 +83,11 @@ const menuItems = [
     title: "Practice",
     icon: Gamepad2,
     href: "/dashboard/practice",
+  },
+  {
+    title: "Help",
+    icon: HelpCircle,
+    href: "/dashboard/help",
   },
 ];
 

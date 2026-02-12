@@ -8,11 +8,32 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, Clock, MapPin, Users, Trophy, Eye, Timer, AlertCircle } from "lucide-react";
 import { useMyMatches } from "@/hooks/useMatches";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { customRoomService, CustomRoom } from "@/services/custom-room.service";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+import { CustomRoomDetailsDialog } from "@/components/custom-rooms/custom-room-details-dialog";
+import { useRouter } from "next/navigation";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function MatchesPage() {
   const { matches, loading, error } = useMyMatches();
+  const router = useRouter();
+  const { user, refreshUser } = useAuth();
+  const [openRoomsLoading, setOpenRoomsLoading] = useState(true);
+  const [openRooms, setOpenRooms] = useState<CustomRoom[]>([]);
+  const [joinRoomTarget, setJoinRoomTarget] = useState<CustomRoom | null>(null);
+  const [joinedRoomIds, setJoinedRoomIds] = useState<Set<string>>(new Set());
 
   const categorizedMatches = useMemo(() => {
     const now = new Date();
@@ -33,6 +54,22 @@ export default function MatchesPage() {
     const date = new Date(dateString);
     return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setOpenRoomsLoading(true);
+        const rooms = await customRoomService.listOpenRooms();
+        setOpenRooms(Array.isArray(rooms) ? rooms : []);
+      } catch (e: any) {
+        setOpenRooms([]);
+      } finally {
+        setOpenRoomsLoading(false);
+      }
+    };
+    void load();
+  }, []);
+
   return (
     <div className="p-4 md:p-6 lg:p-8 space-y-6">
       {/* Header */}
@@ -42,6 +79,107 @@ export default function MatchesPage() {
           Track your tournament matches and results
         </p>
       </div>
+
+      {/* Open Custom Rooms */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Open Custom Rooms</CardTitle>
+          <CardDescription>Join rooms created by other players</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {openRoomsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : openRooms.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No open rooms right now.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {openRooms.slice(0, 6).map((r) => (
+                <div key={r.id} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">
+                        {r.type === "CUSTOM_ROOM" ? "Custom Room" : "Lone Wolf"} • {r.rounds} rounds
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        By {r.creator?.username || "Player"} • Entry ₹{Number(r.entryFee || 0).toFixed(0)} • Payout ₹{Number(r.payout || 0).toFixed(0)}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <Badge variant="outline">{r.teamSize}</Badge>
+                        <Badge variant="outline">{r.status}</Badge>
+                      </div>
+                    </div>
+                      <div className="flex flex-col gap-2 shrink-0">
+                      <CustomRoomDetailsDialog
+                        room={r}
+                        trigger={<Button size="sm" variant="outline">Details</Button>}
+                      />
+                      {joinedRoomIds.has(r.id) ? (
+                        <Button size="sm" asChild>
+                          <Link href="/dashboard/custom-matches">Manage</Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => setJoinRoomTarget(r)}>
+                          Join
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={!!joinRoomTarget} onOpenChange={(o) => !o && setJoinRoomTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Join Room</AlertDialogTitle>
+            <AlertDialogDescription>
+              Joining will deduct the entry fee from your wallet.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Wallet Balance</span>
+              <span className="font-semibold">₹{Number(user?.balance || 0).toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-muted-foreground">Entry Fee</span>
+              <span className="font-semibold text-destructive">-₹{Number(joinRoomTarget?.entryFee || 0).toFixed(2)}</span>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!joinRoomTarget) return;
+                const fee = Number(joinRoomTarget.entryFee || 0);
+                const bal = Number(user?.balance || 0);
+                if (fee > 0 && bal < fee) {
+                  toast.error("Insufficient balance. Please add money to your wallet.");
+                  setJoinRoomTarget(null);
+                  return;
+                }
+                try {
+                  const targetId = joinRoomTarget.id;
+                  await customRoomService.joinRoom(joinRoomTarget.id);
+                  toast.success(`Joined room. ₹${fee.toFixed(2)} deducted from your wallet.`);
+                  setJoinedRoomIds((prev) => new Set(prev).add(targetId));
+                  setOpenRooms((prev) => prev.filter((x) => x.id !== targetId));
+                  await refreshUser();
+                  setJoinRoomTarget(null);
+                  router.push("/dashboard/custom-matches");
+                } catch (e: any) {
+                  toast.error(e?.message || "Failed to join");
+                }
+              }}
+            >
+              Confirm & Join
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Error State */}
       {error && (

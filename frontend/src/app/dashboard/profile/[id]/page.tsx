@@ -40,6 +40,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const PROFILE_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 
 interface UserProfile {
   id: string;
@@ -100,7 +103,15 @@ export default function UserProfilePage() {
 
   useEffect(() => {
     if (userId) {
-      fetchUserProfile();
+      const cacheKey = `dashboard:profile:${userId}`;
+      const cached = getCachedPageData<UserProfile>(cacheKey, PROFILE_PAGE_CACHE_TTL_MS);
+      if (cached) {
+        setProfile(cached);
+        setLoading(false);
+        void fetchUserProfile({ silent: true });
+      } else {
+        void fetchUserProfile();
+      }
     }
   }, [userId]);
 
@@ -124,11 +135,12 @@ export default function UserProfilePage() {
     }
   }, [profile]);
 
-  const fetchUserProfile = async () => {
+  const fetchUserProfile = async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) setLoading(true);
       const data: any = await api.get(`/users/${userId}`);
       setProfile(data);
+      setCachedPageData(`dashboard:profile:${userId}`, data);
     } catch (error: any) {
       console.error('Failed to fetch user profile:', error);
       toast.error('Failed to load user profile');

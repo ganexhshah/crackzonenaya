@@ -6,6 +6,8 @@ export interface User {
   username: string;
   fullName?: string;
   avatar?: string;
+  gameName?: string;
+  gameId?: string;
   role: string;
   isVerified: boolean;
   balance?: number;
@@ -29,6 +31,7 @@ export interface AuthResponse {
   message?: string;
   isNewUser?: boolean;
   hasProfile?: boolean;
+  requiresOTP?: boolean;
 }
 
 export const authService = {

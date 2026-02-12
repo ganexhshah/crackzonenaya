@@ -23,6 +23,15 @@ export interface UpdateProfileData {
   discordId?: string;
 }
 
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  gameName?: string;
+  gameId?: string;
+  avatar?: string;
+}
+
 export const userService = {
   async getProfile(): Promise<Profile> {
     return api.get('/users/profile');
@@ -34,5 +43,9 @@ export const userService = {
 
   async uploadAvatar(file: File): Promise<{ avatar: string }> {
     return api.uploadFile('/users/avatar', file, 'avatar');
+  },
+
+  async getAllUsers(): Promise<User[]> {
+    return api.get('/users/all');
   },
 };

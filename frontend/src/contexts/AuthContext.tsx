@@ -73,11 +73,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const register = async (data: RegisterData) => {
     const response = await authService.register(data);
     setUser(response.user);
-    // Mark as first time user for profile setup
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isFirstTimeUser', 'true');
+    
+    // Check if OTP verification is required
+    if (response.requiresOTP) {
+      // Redirect to OTP verification page with email
+      router.push(`/auth/verify-otp?email=${encodeURIComponent(data.email)}`);
+    } else {
+      // Mark as first time user for profile setup
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('isFirstTimeUser', 'true');
+      }
+      router.push('/profile/setup');
     }
-    router.push('/profile/setup');
   };
 
   const logout = async () => {

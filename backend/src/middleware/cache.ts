@@ -6,7 +6,10 @@ import { cache } from '../config/redis';
  * @param ttl - Time to live in seconds (default: 300 = 5 minutes)
  * @param keyPrefix - Prefix for cache key (default: 'cache')
  */
-export const cacheMiddleware = (ttl: number = 300, keyPrefix: string = 'cache') => {
+export const cacheMiddleware = (
+  ttl: number = 300,
+  keyPrefix: string | ((req: Request) => string) = 'cache'
+) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     // Only cache GET requests
     if (req.method !== 'GET') {
@@ -14,8 +17,9 @@ export const cacheMiddleware = (ttl: number = 300, keyPrefix: string = 'cache') 
     }
 
     try {
+      const prefix = typeof keyPrefix === 'function' ? keyPrefix(req) : keyPrefix;
       // Generate cache key from URL and query params
-      const cacheKey = `${keyPrefix}:${req.originalUrl || req.url}`;
+      const cacheKey = `${prefix}:${req.originalUrl || req.url}`;
 
       // Try to get from cache
       const cachedData = await cache.get(cacheKey);

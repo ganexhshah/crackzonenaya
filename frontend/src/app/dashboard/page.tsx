@@ -18,12 +18,43 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Trophy, Calendar, Users, DollarSign, Clock, Filter, User, UserPlus, Info, MapPin, AlertCircle, Wallet as WalletIcon, Crown, Shield } from "lucide-react";
+import { Trophy, Calendar, Users, DollarSign, Clock, Filter, User, UserPlus, Info, MapPin, AlertCircle, Crown, Shield, Wallet, Gamepad2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { customRoomService, CustomRoom, CustomRoomTeamSize, CustomRoomType } from "@/services/custom-room.service";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+const DASHBOARD_CACHE_TTL_MS = 2 * 60 * 1000;
+let dashboardCache:
+  | {
+      timestamp: number;
+      tournaments: any[];
+      scrims: any[];
+      userTeams: any[];
+      stats: {
+        activeTournaments: number;
+        playersOnline: number;
+        activeTeams: number;
+        totalPrizes: number;
+      };
+      customRooms: CustomRoom[];
+    }
+  | null = null;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -40,6 +71,22 @@ export default function DashboardPage() {
   const [scrimsLoading, setScrimsLoading] = useState(true);
   const [userTeams, setUserTeams] = useState<any[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
+  const [customRooms, setCustomRooms] = useState<CustomRoom[]>([]);
+  const [customRoomsLoading, setCustomRoomsLoading] = useState(true);
+
+  const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [roomType, setRoomType] = useState<CustomRoomType>("CUSTOM_ROOM");
+  const [teamSize, setTeamSize] = useState<CustomRoomTeamSize>("ONE_V_ONE");
+  const [rounds, setRounds] = useState<number>(13);
+  const [throwableLimit, setThrowableLimit] = useState(false);
+  const [characterSkill, setCharacterSkill] = useState(false);
+  const [headshotOnly, setHeadshotOnly] = useState(false);
+  const [gunAttributes, setGunAttributes] = useState(false);
+  const [coinSetting, setCoinSetting] = useState<number>(0);
+  const [roomMaker, setRoomMaker] = useState<"ME" | "OPPONENT">("ME");
+  const [entryFee, setEntryFee] = useState<number>(0);
+  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
   const [stats, setStats] = useState({
     activeTournaments: 0,
     playersOnline: 0,
@@ -47,21 +94,103 @@ export default function DashboardPage() {
     totalPrizes: 0,
   });
 
-  // Mock wallet balance - in production, fetch from backend
-  const walletBalance = 1250.50;
+  const currentBalance = Number(user?.balance || 0);
+  const willDeduct = Number(entryFee || 0);
+  const hasEnoughForCreate = willDeduct <= 0 || currentBalance >= willDeduct;
+
+  const createRoomNow = async () => {
+    try {
+      setCreatingRoom(true);
+      const created = await customRoomService.createRoom({
+        type: roomType,
+        teamSize,
+        rounds,
+        throwableLimit,
+        characterSkill,
+        headshotOnly,
+        gunAttributes,
+        coinSetting,
+        roomMaker,
+        entryFee,
+      });
+      toast.success("Room created");
+      setShowCreateRoom(false);
+      setShowCreateConfirm(false);
+      setCustomRooms((prev) => [created, ...prev].slice(0, 5));
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to create room");
+    } finally {
+      setCreatingRoom(false);
+    }
+  };
 
   useEffect(() => {
-    fetchTournaments();
-    fetchScrims();
-    fetchUserTeams();
+    const now = Date.now();
+    const hasFreshCache = dashboardCache && now - dashboardCache.timestamp < DASHBOARD_CACHE_TTL_MS;
+
+    if (hasFreshCache) {
+      setTournaments(dashboardCache!.tournaments);
+      setScrims(dashboardCache!.scrims);
+      setUserTeams(dashboardCache!.userTeams);
+      setStats(dashboardCache!.stats);
+      setCustomRooms(dashboardCache!.customRooms || []);
+      setLoading(false);
+      setScrimsLoading(false);
+      setTeamsLoading(false);
+      setCustomRoomsLoading(false);
+
+      void Promise.all([
+        fetchTournaments({ silent: true }),
+        fetchScrims({ silent: true }),
+        fetchUserTeams({ silent: true }),
+        fetchCustomRooms({ silent: true }),
+      ]);
+      return;
+    }
+
+    void Promise.all([fetchTournaments(), fetchScrims(), fetchUserTeams(), fetchCustomRooms()]);
   }, []);
 
-  const fetchScrims = async () => {
+  const setDashboardCache = (patch: Partial<NonNullable<typeof dashboardCache>>) => {
+    const previous = dashboardCache;
+    dashboardCache = {
+      timestamp: Date.now(),
+      tournaments: patch.tournaments ?? previous?.tournaments ?? [],
+      scrims: patch.scrims ?? previous?.scrims ?? [],
+      userTeams: patch.userTeams ?? previous?.userTeams ?? [],
+      customRooms: patch.customRooms ?? previous?.customRooms ?? [],
+      stats:
+        patch.stats ??
+        previous?.stats ?? {
+          activeTournaments: 0,
+          playersOnline: 0,
+          activeTeams: 0,
+          totalPrizes: 0,
+        },
+    };
+  };
+
+  const fetchCustomRooms = async (options?: { silent?: boolean }) => {
     try {
-      setScrimsLoading(true);
+      if (!options?.silent) setCustomRoomsLoading(true);
+      const data = await customRoomService.listMyRooms();
+      const rooms = Array.isArray(data) ? data.slice(0, 5) : [];
+      setCustomRooms(rooms);
+      setDashboardCache({ customRooms: rooms });
+    } catch (e) {
+      setCustomRooms([]);
+    } finally {
+      setCustomRoomsLoading(false);
+    }
+  };
+
+  const fetchScrims = async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) setScrimsLoading(true);
       const data: any = await api.get('/scrims/public');
       const scrimsData = Array.isArray(data) ? data.slice(0, 3) : []; // Show only 3 scrims
       setScrims(scrimsData);
+      setDashboardCache({ scrims: scrimsData });
     } catch (error: any) {
       console.error('Failed to fetch scrims:', error);
       setScrims([]);
@@ -70,12 +199,13 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchUserTeams = async () => {
+  const fetchUserTeams = async (options?: { silent?: boolean }) => {
     try {
-      setTeamsLoading(true);
+      if (!options?.silent) setTeamsLoading(true);
       const data: any = await api.get('/teams/my-teams');
       const teamsData = Array.isArray(data) ? data : [];
       setUserTeams(teamsData);
+      setDashboardCache({ userTeams: teamsData });
     } catch (error: any) {
       console.error('Failed to fetch teams:', error);
       setUserTeams([]);
@@ -84,18 +214,20 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchTournaments = async () => {
+  const fetchTournaments = async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) setLoading(true);
       const data: any = await api.get('/tournaments');
       const tournamentsData = Array.isArray(data) ? data : [];
-      setTournaments(tournamentsData);
-      setStats({
+      const nextStats = {
         activeTournaments: tournamentsData.length || 0,
         playersOnline: 1200, // Mock data
         activeTeams: 156, // Mock data
         totalPrizes: 50000, // Mock data
-      });
+      };
+      setTournaments(tournamentsData);
+      setStats(nextStats);
+      setDashboardCache({ tournaments: tournamentsData, stats: nextStats });
     } catch (error: any) {
       console.error('Failed to fetch tournaments:', error);
       toast.error('Failed to load tournaments');
@@ -133,7 +265,8 @@ export default function DashboardPage() {
       return;
     }
 
-    if (walletBalance < selectedTournament.entryFee) {
+    const userBalance = user?.balance || 0;
+    if (userBalance < selectedTournament.entryFee) {
       toast.error("Insufficient balance! Please add money to your wallet.");
       return;
     }
@@ -172,45 +305,44 @@ export default function DashboardPage() {
           className="w-full"
         >
           <CarouselContent className="-ml-2 md:-ml-4">
-            {/* Wallet Balance Card */}
-            <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
-              <Link href="/dashboard/wallet">
-                <Card className="bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600 border-0 text-white overflow-hidden cursor-pointer hover:scale-[1.02] transition-all hover:shadow-2xl h-[200px] sm:h-[220px]">
-                  <CardContent className="p-5 sm:p-6 relative h-full flex flex-col justify-between">
-                    <div className="relative z-10">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="p-2 sm:p-3 bg-white/20 backdrop-blur-sm rounded-xl">
-                          <WalletIcon className="h-6 w-6 sm:h-7 sm:w-7" />
-                        </div>
-                        <Badge variant="secondary" className="text-xs font-semibold shadow-sm">Active</Badge>
-                      </div>
-                      <div>
-                        <p className="text-white/90 text-xs sm:text-sm font-medium mb-1">Wallet Balance</p>
-                        <h3 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 tracking-tight">
-                          ₹{walletBalance.toFixed(2)}
-                        </h3>
-                      </div>
+            {/* Wallet Balance Banner Card */}
+            <CarouselItem className="pl-2 md:pl-4 basis-[92%] sm:basis-1/2 lg:basis-1/3">
+              <Card className="h-[220px] border-2 border-emerald-200 dark:border-emerald-900 bg-gradient-to-br from-emerald-50 via-green-50 to-teal-100 dark:from-emerald-950/40 dark:via-green-950/30 dark:to-teal-950/30">
+                <CardContent className="p-5 sm:p-6 h-full flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 mb-2">
+                      <Wallet className="h-5 w-5" />
+                      <p className="text-sm font-semibold">Wallet Balance</p>
                     </div>
-                    <div className="relative z-10">
-                      <Button size="sm" variant="secondary" className="font-semibold shadow-lg hover:shadow-xl transition-shadow w-full sm:w-auto">
-                        Add Money
-                      </Button>
+                    <div className="text-3xl sm:text-4xl font-bold text-emerald-700 dark:text-emerald-300">
+                      रु {(user?.balance || 0).toFixed(2)}
                     </div>
-                    {/* Decorative Elements */}
-                    <div className="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-white/10 rounded-full blur-3xl"></div>
-                    <div className="absolute bottom-0 left-0 w-24 h-24 sm:w-32 sm:h-32 bg-black/10 rounded-full blur-2xl"></div>
-                    <div className="absolute top-1/2 right-1/4 w-20 h-20 bg-white/5 rounded-full blur-xl"></div>
-                  </CardContent>
-                </Card>
-              </Link>
-            </CarouselItem>
+                    <p className="text-xs sm:text-sm text-emerald-800/80 dark:text-emerald-200/80 mt-1">
+                      Add or withdraw funds instantly
+                    </p>
+                  </div>
 
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button asChild className="w-full">
+                      <Link href="/dashboard/wallet">
+                        Add Money
+                      </Link>
+                    </Button>
+                    <Button asChild variant="outline" className="w-full bg-background/70">
+                      <Link href="/dashboard/wallet">
+                        Withdraw
+                      </Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </CarouselItem>
             {/* User Teams Cards */}
             {teamsLoading ? (
               <>
                 {[1, 2].map((i) => (
-                  <CarouselItem key={i} className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
-                    <Card className="animate-pulse h-[200px] sm:h-[220px]">
+                  <CarouselItem key={i} className="pl-2 md:pl-4 basis-[92%] sm:basis-1/2 lg:basis-1/3">
+                    <Card className="animate-pulse h-[220px]">
                       <CardContent className="p-5 sm:p-6">
                         <div className="flex items-center gap-3 mb-4">
                           <div className="h-14 w-14 bg-muted rounded-full shrink-0" />
@@ -235,9 +367,9 @@ export default function DashboardPage() {
                 const memberCount = team.members?.length || 0;
                 
                 return (
-                  <CarouselItem key={team.id} className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
+                  <CarouselItem key={team.id} className="pl-2 md:pl-4 basis-[92%] sm:basis-1/2 lg:basis-1/3">
                     <Link href={`/dashboard/teams/${team.id}`}>
-                      <Card className="hover:shadow-xl transition-all hover:scale-[1.02] cursor-pointer h-[200px] sm:h-[220px] border-2 hover:border-primary/50">
+                      <Card className="hover:shadow-xl transition-all hover:scale-[1.02] cursor-pointer h-[220px] border-2 hover:border-primary/50">
                         <CardContent className="p-5 sm:p-6 h-full flex flex-col justify-between">
                           <div>
                             <div className="flex items-start gap-3 mb-4">
@@ -266,17 +398,17 @@ export default function DashboardPage() {
                             </div>
                           </div>
                           <div className="grid grid-cols-3 gap-2 text-center">
-                            <div className="p-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                            <div className="p-2 sm:p-2.5 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
                               <div className="font-bold text-base sm:text-lg text-blue-600 dark:text-blue-400">{team.stats?.matches || 0}</div>
-                              <p className="text-xs text-muted-foreground">Matches</p>
+                              <p className="text-[10px] sm:text-xs text-muted-foreground">Matches</p>
                             </div>
-                            <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                            <div className="p-2 sm:p-2.5 bg-green-50 dark:bg-green-950/30 rounded-lg">
                               <div className="font-bold text-base sm:text-lg text-green-600 dark:text-green-400">{team.stats?.wins || 0}</div>
-                              <p className="text-xs text-muted-foreground">Wins</p>
+                              <p className="text-[10px] sm:text-xs text-muted-foreground">Wins</p>
                             </div>
-                            <div className="p-2 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+                            <div className="p-2 sm:p-2.5 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
                               <div className="font-bold text-base sm:text-lg text-purple-600 dark:text-purple-400">{team.stats?.points || 0}</div>
-                              <p className="text-xs text-muted-foreground">Points</p>
+                              <p className="text-[10px] sm:text-xs text-muted-foreground">Points</p>
                             </div>
                           </div>
                         </CardContent>
@@ -286,8 +418,8 @@ export default function DashboardPage() {
                 );
               })
             ) : (
-              <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
-                <Card className="border-2 border-dashed hover:border-solid hover:border-primary transition-all h-[200px] sm:h-[220px]">
+              <CarouselItem className="pl-2 md:pl-4 basis-[92%] sm:basis-1/2 lg:basis-1/3">
+                <Card className="border-2 border-dashed hover:border-solid hover:border-primary transition-all h-[220px]">
                   <CardContent className="p-5 sm:p-6 h-full flex flex-col items-center justify-center text-center">
                     <div className="p-3 bg-muted rounded-full mb-3">
                       <Users className="h-8 w-8 sm:h-10 sm:w-10 text-muted-foreground" />
@@ -313,30 +445,384 @@ export default function DashboardPage() {
               </CarouselItem>
             )}
 
-            {/* View All Teams Card */}
-            {userTeams.length > 0 && (
-              <CarouselItem className="pl-2 md:pl-4 basis-full sm:basis-1/2 lg:basis-1/3">
-                <Link href="/dashboard/teams">
-                  <Card className="border-dashed hover:border-solid hover:shadow-lg transition-all cursor-pointer h-[180px]">
-                    <CardContent className="p-6 h-full flex flex-col items-center justify-center text-center">
-                      <Shield className="h-12 w-12 mb-3 text-primary" />
-                      <p className="font-semibold mb-1">View All Teams</p>
-                      <p className="text-xs text-muted-foreground mb-3">
-                        Manage your {userTeams.length} team{userTeams.length !== 1 ? 's' : ''}
-                      </p>
-                      <Button size="sm">
-                        Go to Teams
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </Link>
-              </CarouselItem>
-            )}
+            {/* Game Profile Card */}
+            <CarouselItem className="pl-2 md:pl-4 basis-[92%] sm:basis-1/2 lg:basis-1/3">
+              <Card className="h-[220px] border-2 hover:border-primary/50 transition-colors">
+                <CardContent className="p-5 sm:p-6 h-full flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-muted-foreground mb-2">
+                      <Gamepad2 className="h-5 w-5" />
+                      <p className="text-sm font-semibold">Game Profile</p>
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Game Name</p>
+                        <p className="font-bold text-lg truncate">{user?.gameName || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Game ID</p>
+                        <p className="font-mono text-sm break-all">{user?.gameId || "Not set"}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button asChild variant="outline" className="w-full">
+                      <Link href={user?.id ? `/dashboard/profile/${user.id}` : "/profile/setup"}>
+                        View Profile
+                      </Link>
+                    </Button>
+                    <Button asChild className="w-full">
+                      <Link href="/dashboard/settings">Edit</Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </CarouselItem>
+
           </CarouselContent>
           <CarouselPrevious className="hidden lg:flex -left-4" />
           <CarouselNext className="hidden lg:flex -right-4" />
         </Carousel>
       </div>
+
+      {/* Create Custom Match Room */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold">Custom Match Rooms</h2>
+          <p className="text-sm text-muted-foreground">Create a room, set rules, stake entry fee, and play</p>
+        </div>
+        <Dialog open={showCreateRoom} onOpenChange={setShowCreateRoom}>
+          <DialogTrigger asChild>
+            <Button>
+              Create Room
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[720px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Create Your Own Match Room</DialogTitle>
+              <DialogDescription>Choose room type, rules, and entry fee.</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Room Type</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={roomType === "CUSTOM_ROOM" ? "default" : "outline"}
+                    className="w-full justify-center"
+                    onClick={() => setRoomType("CUSTOM_ROOM")}
+                  >
+                    Custom Room
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={roomType === "LONE_WOLF" ? "default" : "outline"}
+                    className="w-full justify-center"
+                    onClick={() => setRoomType("LONE_WOLF")}
+                  >
+                    Lone Wolf
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Team Size</Label>
+                <div className={cn("grid gap-2", roomType === "CUSTOM_ROOM" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2")}>
+                  <Button
+                    type="button"
+                    variant={teamSize === "ONE_V_ONE" ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setTeamSize("ONE_V_ONE")}
+                  >
+                    1v1
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={teamSize === "TWO_V_TWO" ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setTeamSize("TWO_V_TWO")}
+                  >
+                    2v2
+                  </Button>
+                  {roomType === "CUSTOM_ROOM" && (
+                    <Button
+                      type="button"
+                      variant={teamSize === "THREE_V_THREE" ? "default" : "outline"}
+                      className="w-full"
+                      onClick={() => setTeamSize("THREE_V_THREE")}
+                    >
+                      3v3
+                    </Button>
+                  )}
+                  {roomType === "CUSTOM_ROOM" && (
+                    <Button
+                      type="button"
+                      variant={teamSize === "FOUR_V_FOUR" ? "default" : "outline"}
+                      className="w-full"
+                      onClick={() => setTeamSize("FOUR_V_FOUR")}
+                    >
+                      4v4
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Rounds</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(roomType === "CUSTOM_ROOM" ? [7, 13] : [9, 13]).map((r) => (
+                    <Button
+                      key={r}
+                      type="button"
+                      variant={rounds === r ? "default" : "outline"}
+                      className="w-full"
+                      onClick={() => setRounds(r)}
+                    >
+                      {r}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Coin Setting</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={coinSetting === 0 ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setCoinSetting(0)}
+                  >
+                    Default Coin
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={coinSetting === 9950 ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setCoinSetting(9950)}
+                  >
+                    9950
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-sm">Throwable Limit</p>
+                  <p className="text-xs text-muted-foreground">Enable throwable limit</p>
+                </div>
+                <Switch checked={throwableLimit} onCheckedChange={setThrowableLimit} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-sm">Character Skill</p>
+                  <p className="text-xs text-muted-foreground">Allow character skills</p>
+                </div>
+                <Switch checked={characterSkill} onCheckedChange={setCharacterSkill} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-sm">Headshot Mode</p>
+                  <p className="text-xs text-muted-foreground">Headshot only</p>
+                </div>
+                <Switch checked={headshotOnly} onCheckedChange={setHeadshotOnly} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="font-medium text-sm">Gun Attributes</p>
+                  <p className="text-xs text-muted-foreground">Enable gun attributes</p>
+                </div>
+                <Switch checked={gunAttributes} onCheckedChange={setGunAttributes} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              <div className="space-y-2">
+                <Label>Room Maker</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={roomMaker === "ME" ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setRoomMaker("ME")}
+                  >
+                    Me
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={roomMaker === "OPPONENT" ? "default" : "outline"}
+                    className="w-full"
+                    onClick={() => setRoomMaker("OPPONENT")}
+                  >
+                    Opponent
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Entry Fee (INR)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={entryFee}
+                  onChange={(e) => setEntryFee(Number(e.target.value || 0))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Winner payout: ₹{(Number(entryFee || 0) * 1.8).toFixed(2)} (1.8 odds)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <Button
+                onClick={() => {
+                  if (!hasEnoughForCreate) {
+                    toast.error("Insufficient balance. Please add money to your wallet.");
+                    return;
+                  }
+                  if (willDeduct > 0) {
+                    setShowCreateConfirm(true);
+                    return;
+                  }
+                  void createRoomNow();
+                }}
+                disabled={creatingRoom}
+                className="flex-1"
+              >
+                {creatingRoom ? "Creating..." : "Create Room"}
+              </Button>
+              {!hasEnoughForCreate && (
+                <Button asChild variant="outline" className="flex-1">
+                  <Link href="/dashboard/wallet">Add Money</Link>
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setShowCreateRoom(false)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+
+            <AlertDialog open={showCreateConfirm} onOpenChange={setShowCreateConfirm}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Confirm Entry Fee Deduction</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will deduct ₹{willDeduct.toFixed(2)} from your wallet to create the room.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="rounded-lg border p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Wallet Balance</span>
+                    <span className="font-semibold">₹{currentBalance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-muted-foreground">Deduction</span>
+                    <span className="font-semibold text-destructive">-₹{willDeduct.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-muted-foreground">Balance After</span>
+                    <span className="font-semibold">₹{(currentBalance - willDeduct).toFixed(2)}</span>
+                  </div>
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => void createRoomNow()}>
+                    Confirm & Create
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* My Custom Rooms */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">My Custom Rooms</CardTitle>
+          <CardDescription>Manage rooms you created or joined</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {customRoomsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : customRooms.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No rooms yet. Create one to start.</div>
+          ) : (
+            customRooms.map((r) => {
+              const youAreCreator = r.creatorId === user?.id;
+              const opponentName = r.opponent?.username || "Waiting...";
+              const joinable = r.status === "WAITING_JOIN" && !r.opponentId && youAreCreator;
+              return (
+                <div key={r.id} className="rounded-lg border p-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold truncate">
+                          {r.type === "CUSTOM_ROOM" ? "Custom Room" : "Lone Wolf"} •{" "}
+                          {r.teamSize.replaceAll("_", " ").replace("ONE V ONE", "1v1").replace("TWO V TWO", "2v2").replace("THREE V THREE", "3v3").replace("FOUR V FOUR", "4v4")} •{" "}
+                          {r.rounds} rounds
+                        </p>
+                        <Badge variant="outline">{r.status}</Badge>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2 text-xs">
+                        <div className="rounded-md bg-muted p-2">
+                          <div className="text-muted-foreground">Opponent</div>
+                          <div className="font-semibold truncate">{opponentName}</div>
+                        </div>
+                        <div className="rounded-md bg-muted p-2">
+                          <div className="text-muted-foreground">Entry</div>
+                          <div className="font-semibold">₹{Number(r.entryFee || 0).toFixed(0)}</div>
+                        </div>
+                        <div className="rounded-md bg-muted p-2">
+                          <div className="text-muted-foreground">Payout</div>
+                          <div className="font-semibold text-emerald-600">₹{Number(r.payout || 0).toFixed(0)}</div>
+                        </div>
+                        <div className="rounded-md bg-muted p-2">
+                          <div className="text-muted-foreground">Room Maker</div>
+                          <div className="font-semibold">{r.roomMaker}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {joinable && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={async () => {
+                            const link = `${window.location.origin}/dashboard/matches?room=${encodeURIComponent(r.id)}`;
+                            try {
+                              await navigator.clipboard.writeText(link);
+                              toast.success("Join link copied");
+                            } catch {
+                              toast.success("Link ready: " + link);
+                            }
+                          }}
+                        >
+                          Copy Join Link
+                        </Button>
+                      )}
+                      {r.opponentId && r.status === "READY_TO_START" && (
+                        <Button size="sm" variant="outline" onClick={async () => {
+                          try { await customRoomService.ready(r.id); toast.success("Ready clicked"); void fetchCustomRooms({silent:true}); } catch(e:any){ toast.error(e?.message||"Failed");}
+                        }}>
+                          I’m Ready
+                        </Button>
+                      )}
+                      {r.status === "STARTED" && (
+                        <Button size="sm" asChild>
+                          <Link href="/dashboard/matches">Open Matches</Link>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </CardContent>
+      </Card>
 
       {/* Tournaments Section */}
       <div>
@@ -622,7 +1108,7 @@ export default function DashboardPage() {
                       <span className="font-semibold text-foreground">रु {tournament.prizePool} Prize Pool</span>
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
-                      <WalletIcon className="h-4 w-4" />
+                      <Wallet className="h-4 w-4" />
                       <span className="font-semibold text-orange-600">रु {tournament.entryFee} Entry Fee</span>
                     </div>
                   </div>
@@ -639,6 +1125,20 @@ export default function DashboardPage() {
               <Trophy className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
               <p className="font-medium text-muted-foreground">No tournaments match your filters</p>
               <p className="text-sm text-muted-foreground mt-2">Try adjusting your filter criteria</p>
+              <div className="mt-5 mx-auto max-w-md rounded-lg border bg-muted/30 p-4 text-left">
+                <p className="font-semibold">Try Custom Matches</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Join open custom rooms created by other players, or create your own match room.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2 mt-3">
+                  <Button asChild variant="outline" className="flex-1">
+                    <Link href="/dashboard/custom-matches">Browse Custom Matches</Link>
+                  </Button>
+                  <Button asChild className="flex-1">
+                    <Link href="/dashboard#custom-match-rooms">Create Room</Link>
+                  </Button>
+                </div>
+              </div>
               <Button 
                 variant="outline" 
                 className="mt-4"
@@ -669,17 +1169,17 @@ export default function DashboardPage() {
                 <Separator />
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Your Balance</span>
-                  <span className={`font-semibold text-lg ${walletBalance >= (selectedTournament?.entryFee || 0) ? 'text-green-600' : 'text-red-600'}`}>
-                    रु {walletBalance.toFixed(2)}
+                  <span className={`font-semibold text-lg ${(user?.balance || 0) >= (selectedTournament?.entryFee || 0) ? 'text-green-600' : 'text-red-600'}`}>
+                    रु {(user?.balance || 0).toFixed(2)}
                   </span>
                 </div>
-                {walletBalance >= (selectedTournament?.entryFee || 0) && (
+                {(user?.balance || 0) >= (selectedTournament?.entryFee || 0) && (
                   <>
                     <Separator />
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Balance After</span>
                       <span className="font-semibold text-lg text-blue-600">
-                        रु {(walletBalance - (selectedTournament?.entryFee || 0)).toFixed(2)}
+                        रु {((user?.balance || 0) - (selectedTournament?.entryFee || 0)).toFixed(2)}
                       </span>
                     </div>
                   </>
@@ -687,7 +1187,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Insufficient Balance Warning */}
-              {walletBalance < (selectedTournament?.entryFee || 0) && (
+              {(user?.balance || 0) < (selectedTournament?.entryFee || 0) && (
                 <div className="p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
                   <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                   <div>
@@ -695,11 +1195,10 @@ export default function DashboardPage() {
                       Insufficient Balance
                     </p>
                     <p className="text-sm text-red-800 dark:text-red-200 mt-1">
-                      You need रु {((selectedTournament?.entryFee || 0) - walletBalance).toFixed(2)} more to register for this tournament.
+                      You need रु {((selectedTournament?.entryFee || 0) - (user?.balance || 0)).toFixed(2)} more to register for this tournament.
                     </p>
                     <Button asChild size="sm" className="mt-3" variant="destructive">
                       <Link href="/dashboard/wallet">
-                        <WalletIcon className="mr-2 h-4 w-4" />
                         Add Money
                       </Link>
                     </Button>
@@ -708,7 +1207,7 @@ export default function DashboardPage() {
               )}
 
               {/* Tournament Rules */}
-              {walletBalance >= (selectedTournament?.entryFee || 0) && (
+              {(user?.balance || 0) >= (selectedTournament?.entryFee || 0) && (
                 <>
                   <div>
                     <h4 className="font-semibold mb-2">Tournament Rules</h4>
@@ -838,7 +1337,7 @@ export default function DashboardPage() {
                             </div>
                           )}
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <WalletIcon className="h-4 w-4" />
+                            <Wallet className="h-4 w-4" />
                             <span className="font-semibold text-green-600">
                               ₹{entry.entryFeeAmount || 0} Entry
                             </span>
@@ -875,7 +1374,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-6 text-center">
             <div className="text-3xl font-bold text-blue-600">{stats.activeTournaments}</div>
@@ -900,8 +1399,15 @@ export default function DashboardPage() {
             <p className="text-sm text-muted-foreground mt-1">Total Prizes</p>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="p-6 text-center">
+            <div className="text-3xl font-bold text-emerald-600">रु {(user?.balance || 0).toFixed(2)}</div>
+            <p className="text-sm text-muted-foreground mt-1">Wallet Balance</p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 }
+
 

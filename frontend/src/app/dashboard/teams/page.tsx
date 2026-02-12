@@ -12,6 +12,10 @@ import { Users, UserPlus, Crown, Edit, Plus, Trophy, Target, TrendingUp, X } fro
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const TEAMS_PAGE_CACHE_KEY = "dashboard:teams:list";
+const TEAMS_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 
 interface Team {
   id: string;
@@ -42,14 +46,31 @@ export default function TeamsPage() {
   const [joinRequests, setJoinRequests] = useState<Map<string, JoinRequest>>(new Map());
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [showTeamDetails, setShowTeamDetails] = useState(false);
+  const [showJoinByLink, setShowJoinByLink] = useState(false);
+  const [inviteLink, setInviteLink] = useState("");
 
   useEffect(() => {
-    fetchTeams();
+    const cached = getCachedPageData<{
+      myTeams: Team[];
+      availableTeams: Team[];
+      joinRequests: [string, JoinRequest][];
+    }>(TEAMS_PAGE_CACHE_KEY, TEAMS_PAGE_CACHE_TTL_MS);
+
+    if (cached) {
+      setMyTeams(cached.myTeams);
+      setAvailableTeams(cached.availableTeams);
+      setJoinRequests(new Map(cached.joinRequests));
+      setLoading(false);
+      void fetchTeams({ silent: true });
+      return;
+    }
+
+    void fetchTeams();
   }, []);
 
-  const fetchTeams = async () => {
+  const fetchTeams = async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) setLoading(true);
       // Fetch user's teams
       const myTeamsData: any = await api.get('/teams/my-teams');
       setMyTeams(Array.isArray(myTeamsData) ? myTeamsData : []);
@@ -70,6 +91,17 @@ export default function TeamsPage() {
       if (savedRequests) {
         const requestsArray = JSON.parse(savedRequests);
         setJoinRequests(new Map(requestsArray));
+        setCachedPageData(TEAMS_PAGE_CACHE_KEY, {
+          myTeams: Array.isArray(myTeamsData) ? myTeamsData : [],
+          availableTeams: available,
+          joinRequests: requestsArray,
+        });
+      } else {
+        setCachedPageData(TEAMS_PAGE_CACHE_KEY, {
+          myTeams: Array.isArray(myTeamsData) ? myTeamsData : [],
+          availableTeams: available,
+          joinRequests: [],
+        });
       }
     } catch (error: any) {
       console.error('Failed to fetch teams:', error);
@@ -96,6 +128,11 @@ export default function TeamsPage() {
       
       // Save to localStorage
       localStorage.setItem('joinRequests', JSON.stringify(Array.from(updatedRequests.entries())));
+      setCachedPageData(TEAMS_PAGE_CACHE_KEY, {
+        myTeams,
+        availableTeams,
+        joinRequests: Array.from(updatedRequests.entries()),
+      });
       
       toast.success('Join request sent! The team captain will review your request.');
     } catch (error: any) {
@@ -111,6 +148,11 @@ export default function TeamsPage() {
       
       // Save to localStorage
       localStorage.setItem('joinRequests', JSON.stringify(Array.from(updatedRequests.entries())));
+      setCachedPageData(TEAMS_PAGE_CACHE_KEY, {
+        myTeams,
+        availableTeams,
+        joinRequests: Array.from(updatedRequests.entries()),
+      });
       
       toast.success('Join request cancelled');
     } catch (error: any) {
@@ -163,6 +205,24 @@ export default function TeamsPage() {
     router.push(`/dashboard/profile/${userId}`);
   };
 
+  const handleJoinByLink = () => {
+    if (!inviteLink.trim()) {
+      toast.error("Please enter an invitation link");
+      return;
+    }
+
+    // Extract team ID from the link
+    const match = inviteLink.match(/\/join\/team\/([a-zA-Z0-9_-]+)/);
+    if (!match) {
+      toast.error("Invalid invitation link");
+      return;
+    }
+
+    const teamId = match[1];
+    // Navigate to the join page
+    router.push(`/join/team/${teamId}`);
+  };
+
   if (loading) {
     return (
       <div className="p-4 md:p-6 lg:p-8 space-y-6">
@@ -204,13 +264,64 @@ export default function TeamsPage() {
             Manage your teams and find new teammates
           </p>
         </div>
-        <Button size="lg" asChild>
-          <Link href="/dashboard/teams/create">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Team
-          </Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setShowJoinByLink(true)}>
+            <UserPlus className="mr-2 h-4 w-4" />
+            Join by Link
+          </Button>
+          <Button size="lg" asChild>
+            <Link href="/dashboard/teams/create">
+              <Plus className="mr-2 h-4 w-4" />
+              Create Team
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      {/* Join by Link Dialog */}
+      <Dialog open={showJoinByLink} onOpenChange={setShowJoinByLink}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Join Team by Invitation Link</DialogTitle>
+            <DialogDescription>
+              Paste the invitation link you received from a team owner
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Invitation Link</label>
+              <input
+                type="text"
+                placeholder="http://localhost:3000/join/team/..."
+                value={inviteLink}
+                onChange={(e) => setInviteLink(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md bg-background"
+              />
+              <p className="text-xs text-muted-foreground">
+                Example: http://localhost:3000/join/team/cmlhu9u1l0001vq1kgz0d334m
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleJoinByLink}
+                className="flex-1"
+                disabled={!inviteLink.trim()}
+              >
+                Join Team
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowJoinByLink(false);
+                  setInviteLink("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* My Teams Section */}
       <div>

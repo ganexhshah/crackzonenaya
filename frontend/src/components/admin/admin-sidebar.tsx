@@ -12,6 +12,7 @@ import {
   Shield,
   FileText,
   BarChart3,
+  LifeBuoy,
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
@@ -64,6 +65,11 @@ const menuItems = [
     title: "Reports",
     icon: Flag,
     href: "/admin/reports",
+  },
+  {
+    title: "Support Tickets",
+    icon: LifeBuoy,
+    href: "/admin/support/tickets",
   },
   {
     title: "Announcements",

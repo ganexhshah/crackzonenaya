@@ -91,4 +91,24 @@ export const teamService = {
   async deleteTeam(id: string): Promise<{ message: string }> {
     return api.delete(`/teams/${id}`);
   },
+
+  async getPublicTeam(id: string): Promise<Team> {
+    return api.get(`/teams/${id}/public`);
+  },
+
+  async acceptInvite(teamId: string): Promise<{ message: string; team: Team }> {
+    return api.post(`/teams/${teamId}/accept-invite`);
+  },
+
+  async declineInvite(teamId: string): Promise<{ message: string }> {
+    return api.post(`/teams/${teamId}/decline-invite`);
+  },
+
+  async inviteMember(teamId: string, userId: string): Promise<{ message: string }> {
+    return api.post(`/teams/${teamId}/invite`, { userId });
+  },
+
+  async getTeamInvitations(teamId: string): Promise<any[]> {
+    return api.get(`/teams/${teamId}/invitations`);
+  },
 };

@@ -16,6 +16,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { userService } from "@/services/user.service";
 import { toast } from "sonner";
 import { Camera, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const SETTINGS_PAGE_CACHE_KEY = "dashboard:settings:profile";
+const SETTINGS_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 
 export default function SettingsPage() {
   const { user, refreshUser } = useAuth();
@@ -49,17 +53,33 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
-    loadProfile();
+    const cached = getCachedPageData<typeof profileData>(SETTINGS_PAGE_CACHE_KEY, SETTINGS_PAGE_CACHE_TTL_MS);
+    if (cached) {
+      setProfileData(cached);
+      setLoading(false);
+      void loadProfile({ silent: true });
+    } else {
+      void loadProfile();
+    }
     loadSettings();
   }, []);
 
-  const loadProfile = async () => {
+  const loadProfile = async (options?: { silent?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.silent) setLoading(true);
       const profile = await userService.getProfile();
       
       if (profile) {
         setProfileData({
+          gameId: profile.gameId || "",
+          gameUsername: profile.gameUsername || "",
+          rank: profile.rank || "",
+          bio: profile.bio || "",
+          phone: profile.phone || "",
+          country: profile.country || "",
+          discordId: profile.discordId || "",
+        });
+        setCachedPageData(SETTINGS_PAGE_CACHE_KEY, {
           gameId: profile.gameId || "",
           gameUsername: profile.gameUsername || "",
           rank: profile.rank || "",
@@ -97,6 +117,7 @@ export default function SettingsPage() {
       setSaving(true);
       await userService.updateProfile(profileData);
       await refreshUser();
+      setCachedPageData(SETTINGS_PAGE_CACHE_KEY, profileData);
       toast.success("Profile updated successfully");
       setError(null);
     } catch (err: any) {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../config/database';
 import { authenticate } from '../middleware/auth';
+import { sendEmail } from '../config/email';
 
 const router = Router();
 
@@ -52,14 +53,25 @@ router.get('/dashboard', async (req, res) => {
 router.get('/users', async (req, res) => {
   try {
     const users = await prisma.user.findMany({
-      include: {
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        role: true,
+        status: true,
+        isVerified: true,
+        balance: true,
+        createdAt: true,
+        updatedAt: true,
         profile: true,
         _count: {
           select: {
             teams: true,
             matches: true,
           },
-        },
+        }
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -75,14 +87,25 @@ router.get('/users/:id', async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        fullName: true,
+        avatar: true,
+        role: true,
+        status: true,
+        isVerified: true,
+        balance: true,
+        createdAt: true,
+        updatedAt: true,
         profile: true,
         teams: {
           include: { team: true },
         },
         matches: true,
         transactions: true,
-      },
+      }
     });
 
     if (!user) {
@@ -239,60 +262,117 @@ router.patch('/transactions/:id/status', async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    if (!['PENDING', 'COMPLETED', 'FAILED'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
+    if (!['COMPLETED', 'FAILED'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status transition. Only COMPLETED or FAILED is allowed.' });
     }
 
-    const transaction = await prisma.transaction.findUnique({
-      where: { id },
-      include: { user: true },
-    });
+    const result = await prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.findUnique({
+        where: { id },
+        include: { user: true },
+      });
 
-    if (!transaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
+      if (!transaction) {
+        return { error: 'NOT_FOUND' as const };
+      }
 
-    // Update transaction status
-    const updatedTransaction = await prisma.transaction.update({
-      where: { id },
-      data: { status },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            email: true,
+      // Enforce one-way transition from PENDING only
+      if (transaction.status !== 'PENDING') {
+        return { error: 'ALREADY_FINALIZED' as const, currentStatus: transaction.status };
+      }
+
+      const updatedCount = await tx.transaction.updateMany({
+        where: { id, status: 'PENDING' },
+        data: { status },
+      });
+
+      if (updatedCount.count !== 1) {
+        return { error: 'CONFLICT' as const };
+      }
+
+      // Balance mutation occurs in same DB transaction to avoid double credit/refund races.
+      if (status === 'COMPLETED' && transaction.type === 'DEPOSIT') {
+        await tx.user.update({
+          where: { id: transaction.userId },
+          data: { balance: { increment: transaction.amount } },
+        });
+      } else if (status === 'FAILED' && transaction.type === 'WITHDRAWAL') {
+        await tx.user.update({
+          where: { id: transaction.userId },
+          data: { balance: { increment: transaction.amount } },
+        });
+      }
+
+      const updatedTransaction = await tx.transaction.findUnique({
+        where: { id },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              email: true,
+            },
           },
         },
-      },
+      });
+
+      return { updatedTransaction, transaction };
     });
 
-    // Update user balance based on transaction type and status
-    if (status === 'COMPLETED' && transaction.status !== 'COMPLETED') {
-      if (transaction.type === 'DEPOSIT') {
-        // Add to balance for deposits
-        await prisma.user.update({
-          where: { id: transaction.userId },
-          data: {
-            balance: {
-              increment: transaction.amount,
-            },
-          },
-        });
+    if ('error' in result) {
+      if (result.error === 'NOT_FOUND') {
+        return res.status(404).json({ error: 'Transaction not found' });
       }
-      // For withdrawals, money was already deducted, so no action needed
-    } else if (status === 'FAILED' && transaction.status !== 'FAILED') {
-      if (transaction.type === 'WITHDRAWAL') {
-        // Refund the amount if withdrawal is rejected
-        await prisma.user.update({
-          where: { id: transaction.userId },
-          data: {
-            balance: {
-              increment: transaction.amount,
-            },
-          },
-        });
+      if (result.error === 'ALREADY_FINALIZED') {
+        return res.status(409).json({ error: `Transaction already finalized as ${result.currentStatus}` });
       }
+      return res.status(409).json({ error: 'Transaction status update conflict. Please retry.' });
+    }
+    const { updatedTransaction, transaction } = result;
+
+    // Notify user when admin accepts/rejects (non-blocking)
+    if (
+      transaction.type === 'DEPOSIT' &&
+      transaction.status !== status &&
+      (status === 'COMPLETED' || status === 'FAILED')
+    ) {
+      const decisionText = status === 'COMPLETED' ? 'accepted' : 'rejected';
+      const subject =
+        status === 'COMPLETED'
+          ? 'Payment Approved - Wallet Credited'
+          : 'Payment Rejected - Action Required';
+
+      sendEmail(
+        transaction.user.email,
+        subject,
+        `
+          <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+              <div style="background:${status === 'COMPLETED' ? '#065f46' : '#7f1d1d'};padding:16px 20px;">
+                <h2 style="margin:0;font-size:18px;color:#ffffff;">
+                  Payment ${status === 'COMPLETED' ? 'Approved' : 'Rejected'}
+                </h2>
+              </div>
+              <div style="padding:20px;">
+                <p style="margin:0 0 12px;color:#4b5563;">
+                  Your deposit request has been <strong>${decisionText}</strong> by admin.
+                </p>
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;">
+                  <p style="margin:0 0 8px;"><strong>Amount:</strong> INR ${Number(transaction.amount).toFixed(2)}</p>
+                  <p style="margin:0;"><strong>Reference:</strong> ${transaction.reference}</p>
+                </div>
+                ${
+                  status === 'COMPLETED'
+                    ? '<p style="margin:16px 0 0;color:#111827;">The amount has been added to your wallet balance.</p>'
+                    : '<p style="margin:16px 0 0;color:#111827;">Please verify your transaction details and submit again if needed.</p>'
+                }
+              </div>
+            </div>
+          </div>
+        `
+      ).catch((emailError) => {
+        console.error('Transaction decision email failed (non-critical):', emailError?.message || emailError);
+      });
     }
 
     res.json(updatedTransaction);

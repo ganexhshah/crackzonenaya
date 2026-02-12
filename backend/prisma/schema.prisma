@@ -35,6 +35,18 @@ model User {
   tournaments   TournamentRegistration[]
   transactions  Transaction[]
   notifications Notification[]
+  joinRequests  TeamJoinRequest[] @relation("UserJoinRequests")
+  supportTickets SupportTicket[]
+  assignedTickets SupportTicket[] @relation("AssignedTickets")
+  ticketMessages TicketMessage[]
+  reportsMade   Report[]  @relation("ReportsMade")
+  reportsReceived Report[] @relation("ReportsReceived")
+  reportsReviewed Report[] @relation("ReportsReviewed")
+  contactMessages ContactMessage[]
+
+  customRoomsCreated CustomRoom[] @relation("CustomRoomCreator")
+  customRoomsJoined  CustomRoom[] @relation("CustomRoomOpponent")
+  customRoomReports  CustomRoomReport[]
   
   @@index([email])
   @@index([username])
@@ -95,6 +107,8 @@ model Team {
   tournaments   TournamentRegistration[]
   transactions  TeamTransaction[]
   moneyRequests TeamMoneyRequest[]
+  joinRequests  TeamJoinRequest[] @relation("TeamJoinRequests")
+  invitations   TeamInvitation[] @relation("TeamInvitations")
   
   @@index([ownerId])
   @@index([tag])
@@ -160,6 +174,48 @@ model TeamMember {
   @@unique([teamId, userId])
   @@index([teamId])
   @@index([userId])
+}
+
+model TeamJoinRequest {
+  id            String    @id @default(cuid())
+  teamId        String
+  team          Team      @relation("TeamJoinRequests", fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation("UserJoinRequests", fields: [userId], references: [id], onDelete: Cascade)
+  status        JoinRequestStatus @default(PENDING)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TeamInvitation {
+  id            String    @id @default(cuid())
+  teamId        String
+  team          Team      @relation("TeamInvitations", fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String
+  invitedBy     String
+  status        InvitationStatus @default(PENDING)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
 }
 
 enum TeamRole {
@@ -300,6 +356,7 @@ model Transaction {
   
   @@index([userId])
   @@index([status])
+  @@unique([type, reference])
 }
 
 enum TransactionType {
@@ -308,6 +365,100 @@ enum TransactionType {
   TOURNAMENT_FEE
   PRIZE_WINNING
   REFUND
+  CUSTOM_MATCH_STAKE
+  CUSTOM_MATCH_PAYOUT
+}
+
+// Custom Match Rooms (wager/custom rooms)
+
+enum CustomRoomType {
+  CUSTOM_ROOM
+  LONE_WOLF
+}
+
+enum CustomRoomStatus {
+  OPEN
+  WAITING_JOIN
+  READY_TO_START
+  STARTED
+  RESULT_SUBMITTED
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+  CANCELLED
+}
+
+enum CustomRoomTeamSize {
+  ONE_V_ONE
+  TWO_V_TWO
+  THREE_V_THREE
+  FOUR_V_FOUR
+}
+
+enum CustomRoomWinnerSide {
+  CREATOR
+  OPPONENT
+}
+
+model CustomRoom {
+  id              String           @id @default(cuid())
+  type            CustomRoomType
+  status          CustomRoomStatus @default(OPEN)
+
+  creatorId       String
+  creator         User             @relation("CustomRoomCreator", fields: [creatorId], references: [id])
+  opponentId      String?
+  opponent        User?            @relation("CustomRoomOpponent", fields: [opponentId], references: [id])
+
+  teamSize        CustomRoomTeamSize
+  rounds          Int
+
+  throwableLimit  Boolean          @default(false)
+  characterSkill  Boolean          @default(false)
+  headshotOnly    Boolean          @default(false)
+  gunAttributes   Boolean          @default(false)
+
+  coinSetting     Int              @default(0) // 0 means default, otherwise e.g. 9950
+  roomMaker       String           @default("ME") // ME / OPPONENT
+
+  entryFee        Float            @default(0)
+  odds            Float            @default(1.8)
+  payout          Float            @default(0) // computed at create/join time
+
+  creatorReady    Boolean          @default(false)
+  opponentReady   Boolean          @default(false)
+
+  roomId          String?
+  roomPassword    String?
+
+  resultScreenshotUrl String?
+  winnerSide      CustomRoomWinnerSide?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  resolvedAt      DateTime?
+
+  reports         CustomRoomReport[]
+
+  @@index([creatorId])
+  @@index([opponentId])
+  @@index([status])
+  @@index([type])
+}
+
+model CustomRoomReport {
+  id          String   @id @default(cuid())
+  roomId      String
+  room        CustomRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  reporterId  String
+  reporter    User     @relation(fields: [reporterId], references: [id])
+  reason      String
+  description String
+  evidence    String[]
+  createdAt   DateTime @default(now())
+
+  @@index([roomId])
+  @@index([reporterId])
 }
 
 model Notification {
@@ -330,7 +481,15 @@ enum NotificationType {
   TOURNAMENT
   TEAM
   PAYMENT
+  WALLET
+  SCRIM
+  TEAM_INVITE
+  TEAM_JOIN
+  MATCH_RESULT
+  TOURNAMENT_START
+  TRANSACTION
   SYSTEM
+  ANNOUNCEMENT
 }
 
 model PaymentMethod {
@@ -352,4 +511,161 @@ enum PaymentMethodType {
   UPI
   BANK
   WALLET
+}
+
+// Support & Help Center Models
+
+model FAQ {
+  id            String    @id @default(cuid())
+  category      FAQCategory
+  question      String
+  answer        String
+  order         Int       @default(0)
+  isActive      Boolean   @default(true)
+  views         Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([category])
+  @@index([isActive])
+}
+
+enum FAQCategory {
+  ACCOUNT
+  PAYMENT
+  TOURNAMENT
+  MATCH_RULES
+  PRIZES
+  REFUND
+  CHEATING
+  TECHNICAL
+  OTHER
+}
+
+model SupportTicket {
+  id            String    @id @default(cuid())
+  ticketNumber  String    @unique
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  category      TicketCategory
+  priority      TicketPriority @default(MEDIUM)
+  subject       String
+  description   String
+  status        TicketStatus @default(OPEN)
+  assignedToId  String?
+  assignedTo    User?     @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  attachments   String[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  resolvedAt    DateTime?
+  
+  messages      TicketMessage[]
+  
+  @@index([userId])
+  @@index([status])
+  @@index([category])
+  @@index([assignedToId])
+}
+
+enum TicketCategory {
+  PAYMENT
+  MATCH_ISSUE
+  BAN_APPEAL
+  TECHNICAL
+  ACCOUNT
+  REFUND
+  REPORT
+  OTHER
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_USER
+  RESOLVED
+  CLOSED
+}
+
+model TicketMessage {
+  id            String    @id @default(cuid())
+  ticketId      String
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id])
+  message       String
+  attachments   String[]
+  isStaffReply  Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  
+  @@index([ticketId])
+  @@index([userId])
+}
+
+model Report {
+  id            String    @id @default(cuid())
+  reporterId    String
+  reporter      User      @relation("ReportsMade", fields: [reporterId], references: [id])
+  reportedUserId String?
+  reportedUser  User?     @relation("ReportsReceived", fields: [reportedUserId], references: [id])
+  type          ReportType
+  reason        String
+  description   String
+  matchId       String?
+  evidence      String[]
+  status        ReportStatus @default(PENDING)
+  reviewedById  String?
+  reviewedBy    User?     @relation("ReportsReviewed", fields: [reviewedById], references: [id])
+  reviewNotes   String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  
+  @@index([reporterId])
+  @@index([reportedUserId])
+  @@index([status])
+  @@index([type])
+}
+
+enum ReportType {
+  CHEATING
+  FAKE_PAYMENT
+  ABUSE
+  PLAYER_MISCONDUCT
+  MATCH_FIXING
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+model ContactMessage {
+  id            String    @id @default(cuid())
+  name          String
+  email         String
+  subject       String
+  message       String
+  userId        String?
+  user          User?     @relation(fields: [userId], references: [id])
+  status        MessageStatus @default(UNREAD)
+  repliedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  
+  @@index([status])
+  @@index([userId])
+}
+
+enum MessageStatus {
+  UNREAD
+  READ
+  REPLIED
 }

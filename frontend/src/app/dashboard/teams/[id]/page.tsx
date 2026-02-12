@@ -63,10 +63,13 @@ import {
   Filter,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { teamService } from "@/services/team.service";
+import { userService, User } from "@/services/user.service";
 import { teamWalletService, TeamTransaction, MoneyRequest } from "@/services/team-wallet.service";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -77,6 +80,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TeamQRDialog } from "@/components/team/team-qr-dialog";
+import { ReportDialog } from "@/components/report/report-dialog";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const TEAM_DETAIL_CACHE_TTL_MS = 2 * 60 * 1000;
 
 export default function TeamDetailPage() {
   const params = useParams();
@@ -91,10 +99,21 @@ export default function TeamDetailPage() {
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
   const [newMemberEmail, setNewMemberEmail] = useState("");
   const [isAddingMember, setIsAddingMember] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
   const [memberToRemove, setMemberToRemove] = useState<any>(null);
   const [isRemovingMember, setIsRemovingMember] = useState(false);
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // New states for user list
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [invitedUsers, setInvitedUsers] = useState<Set<string>>(new Set());
+  const [invitations, setInvitations] = useState<any[]>([]);
 
   // Wallet states
   const [walletBalance, setWalletBalance] = useState(0);
@@ -111,15 +130,85 @@ export default function TeamDetailPage() {
   const transactionsPerPage = 10;
 
   useEffect(() => {
-    fetchTeam();
-    fetchWalletData();
+    const cacheKey = `dashboard:team:${teamId}`;
+    const cached = getCachedPageData<{
+      team: any;
+      walletBalance: number;
+      transactions: TeamTransaction[];
+      moneyRequests: MoneyRequest[];
+      pendingRequests: MoneyRequest[];
+    }>(cacheKey, TEAM_DETAIL_CACHE_TTL_MS);
+
+    if (cached) {
+      setTeam(cached.team);
+      setWalletBalance(cached.walletBalance);
+      setTransactions(cached.transactions);
+      setMoneyRequests(cached.moneyRequests);
+      setPendingRequests(cached.pendingRequests);
+      setLoading(false);
+      void Promise.all([fetchTeam({ silent: true }), fetchWalletData({ silent: true })]);
+    } else {
+      void Promise.all([fetchTeam(), fetchWalletData()]);
+    }
+    
+    // Set up polling to refresh team data every 30 seconds
+    const interval = setInterval(() => {
+      void fetchTeam({ silent: true });
+      void fetchWalletData({ silent: true });
+    }, 30000);
+    
+    return () => clearInterval(interval);
   }, [teamId]);
 
-  const fetchTeam = async () => {
+  useEffect(() => {
+    if (isAddMemberOpen && team && team.ownerId === user?.id) {
+      fetchAllUsers();
+      fetchInvitations();
+    }
+  }, [isAddMemberOpen, team, user]);
+
+  const fetchAllUsers = async () => {
+    setIsLoadingUsers(true);
     try {
-      setLoading(true);
+      const users = await userService.getAllUsers();
+      setAllUsers(users);
+    } catch (error: any) {
+      console.error('Failed to fetch users:', error);
+      toast.error('Failed to load users');
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const fetchInvitations = async () => {
+    try {
+      const invites = await teamService.getTeamInvitations(teamId);
+      setInvitations(invites);
+      
+      // Track invited users
+      const invited = new Set(
+        invites
+          .filter((inv: any) => inv.status === 'PENDING')
+          .map((inv: any) => inv.userId)
+      );
+      setInvitedUsers(invited);
+    } catch (error: any) {
+      console.error('Failed to fetch invitations:', error);
+    }
+  };
+
+  const fetchTeam = async (options?: { silent?: boolean }) => {
+    try {
+      if (!options?.silent) setLoading(true);
       const data: any = await api.get(`/teams/${teamId}`);
       setTeam(data);
+      setCachedPageData(`dashboard:team:${teamId}`, {
+        team: data,
+        walletBalance,
+        transactions,
+        moneyRequests,
+        pendingRequests,
+      });
     } catch (error: any) {
       console.error('Failed to fetch team:', error);
       toast.error('Failed to load team');
@@ -129,7 +218,19 @@ export default function TeamDetailPage() {
     }
   };
 
-  const fetchWalletData = async () => {
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([fetchTeam(), fetchWalletData()]);
+      toast.success('Team data refreshed!');
+    } catch (error) {
+      toast.error('Failed to refresh data');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const fetchWalletData = async (options?: { silent?: boolean }) => {
     try {
       const [balanceData, transactionsData, requestsData, pendingData] = await Promise.all([
         teamWalletService.getBalance(teamId),
@@ -141,7 +242,15 @@ export default function TeamDetailPage() {
       setWalletBalance(balanceData.balance);
       setTransactions(transactionsData);
       setMoneyRequests(requestsData);
-      setPendingRequests(pendingData.filter((req: MoneyRequest) => req.teamId === teamId));
+      const nextPending = pendingData.filter((req: MoneyRequest) => req.teamId === teamId);
+      setPendingRequests(nextPending);
+      setCachedPageData(`dashboard:team:${teamId}`, {
+        team,
+        walletBalance: balanceData.balance,
+        transactions: transactionsData,
+        moneyRequests: requestsData,
+        pendingRequests: nextPending,
+      });
     } catch (error: any) {
       console.error('Failed to fetch wallet data:', error);
     }
@@ -155,26 +264,74 @@ export default function TeamDetailPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const searchUsers = async (query: string) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const users: any = await api.get(`/users/search?query=${encodeURIComponent(query)}`);
+      setSearchResults(users);
+    } catch (error: any) {
+      console.error('Failed to search users:', error);
+      toast.error('Failed to search users');
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSearchChange = (value: string) => {
+    setNewMemberEmail(value);
+    setSelectedUser(null);
+    
+    // Debounce search
+    const timeoutId = setTimeout(() => {
+      searchUsers(value);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  };
+
+  const selectUser = (user: any) => {
+    setSelectedUser(user);
+    setNewMemberEmail(user.email);
+    setSearchResults([]);
+  };
+
   const handleAddMember = async () => {
-    if (!newMemberEmail.trim()) {
-      toast.error('Please enter a user email or ID');
+    if (!selectedUser) {
+      toast.error('Please select a user from the search results');
       return;
     }
 
     setIsAddingMember(true);
     try {
-      // In a real app, you'd search for the user by email first
-      // For now, we'll assume the input is a userId
-      await api.post(`/teams/${teamId}/members`, { userId: newMemberEmail });
+      await api.post(`/teams/${teamId}/members`, { userId: selectedUser.id });
       toast.success('Member added successfully!');
       setNewMemberEmail("");
+      setSelectedUser(null);
+      setSearchResults([]);
       setIsAddMemberOpen(false);
-      fetchTeam(); // Refresh team data
+      fetchTeam();
     } catch (error: any) {
       console.error('Failed to add member:', error);
-      toast.error(error.response?.data?.error || 'Failed to add member');
+      toast.error(error.message || 'Failed to add member');
     } finally {
       setIsAddingMember(false);
+    }
+  };
+
+  const handleInviteUser = async (userId: string) => {
+    try {
+      await teamService.inviteMember(teamId, userId);
+      toast.success('Invitation sent successfully!');
+      setInvitedUsers(prev => new Set([...prev, userId]));
+      fetchInvitations();
+    } catch (error: any) {
+      console.error('Failed to invite user:', error);
+      toast.error(error.response?.data?.error || 'Failed to send invitation');
     }
   };
 
@@ -232,7 +389,9 @@ export default function TeamDetailPage() {
 
     setIsSubmittingRequest(true);
     try {
-      await teamWalletService.requestMoney(teamId, selectedMembers, amount, requestReason);
+      console.log('Sending money request:', { teamId, selectedMembers, amount, requestReason });
+      const result = await teamWalletService.requestMoney(teamId, selectedMembers, amount, requestReason);
+      console.log('Money request result:', result);
       toast.success('Money requests sent successfully!');
       setIsRequestMoneyOpen(false);
       setSelectedMembers([]);
@@ -241,7 +400,9 @@ export default function TeamDetailPage() {
       fetchWalletData();
     } catch (error: any) {
       console.error('Failed to request money:', error);
-      toast.error(error.response?.data?.error || 'Failed to send money requests');
+      console.error('Error details:', error.response?.data);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to send money requests';
+      toast.error(errorMessage);
     } finally {
       setIsSubmittingRequest(false);
     }
@@ -370,9 +531,22 @@ export default function TeamDetailPage() {
         </div>
 
         {/* Action buttons */}
-        {isOwner && (
-          <div className="flex flex-wrap gap-2">
-            <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
+        <div className="flex flex-wrap gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex-1 sm:flex-none"
+          >
+            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+            <span className="sm:hidden">Refresh</span>
+          </Button>
+          
+          {isOwner && (
+            <>
+              <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
                   <Share2 className="mr-2 h-4 w-4" />
@@ -412,6 +586,8 @@ export default function TeamDetailPage() {
               </DialogContent>
             </Dialog>
 
+            <TeamQRDialog teamId={teamId} teamName={team.name} />
+
             <Button asChild size="sm" className="flex-1 sm:flex-none">
               <Link href={`/dashboard/teams/${teamId}/edit`}>
                 <Edit className="mr-2 h-4 w-4" />
@@ -450,20 +626,54 @@ export default function TeamDetailPage() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       <Tabs defaultValue="overview" className="space-y-4 md:space-y-6">
+        {/* Pending Request Alert */}
+        {!isOwner && pendingRequests.length > 0 && (
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 sm:p-4">
+            <div className="flex items-start gap-3">
+              <DollarSign className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-orange-900 text-sm sm:text-base">
+                  {pendingRequests.length} Pending Money Request{pendingRequests.length > 1 ? 's' : ''}
+                </h3>
+                <p className="text-xs sm:text-sm text-orange-700 mt-1">
+                  Your team leader has requested money. Go to the Wallet tab to review and respond.
+                </p>
+              </div>
+              <Button 
+                size="sm" 
+                variant="outline"
+                className="border-orange-600 text-orange-600 hover:bg-orange-100 text-xs shrink-0"
+                onClick={() => {
+                  const walletTab = document.querySelector('[value="wallet"]') as HTMLElement;
+                  walletTab?.click();
+                }}
+              >
+                View
+              </Button>
+            </div>
+          </div>
+        )}
+        
         <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto gap-1 p-1">
           <TabsTrigger value="overview" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <span className="hidden sm:inline">Overview</span>
             <span className="sm:hidden">Info</span>
           </TabsTrigger>
-          <TabsTrigger value="wallet" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+          <TabsTrigger value="wallet" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground relative">
             <Wallet className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">Wallet</span>
             <span className="sm:hidden truncate">Wallet</span>
+            {!isOwner && pendingRequests.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
+                {pendingRequests.length}
+              </span>
+            )}
           </TabsTrigger>
           <TabsTrigger value="members" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Users className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
@@ -688,27 +898,27 @@ export default function TeamDetailPage() {
               </Card>
             )}
 
-            {/* Pending Requests (For Members) */}
-            {!isOwner && pendingRequests.length > 0 && (
-              <Card>
+            {/* Pending Requests (For All Members) */}
+            {pendingRequests.length > 0 && (
+              <Card className="border-orange-500/50 bg-orange-50/5">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                  <CardTitle className="flex items-center gap-2 text-base sm:text-lg text-orange-600">
                     <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
                     Pending Money Requests
                   </CardTitle>
                   <CardDescription className="text-xs sm:text-sm">
-                    Requests from your team leader
+                    {isOwner ? 'Your pending requests to members' : 'Requests from your team leader'}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {pendingRequests.map((request) => (
                     <div
                       key={request.id}
-                      className="p-3 sm:p-4 border rounded-lg space-y-3"
+                      className="p-3 sm:p-4 border border-orange-200 rounded-lg space-y-3 bg-white"
                     >
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-base sm:text-lg">₹{request.amount}</div>
+                          <div className="font-semibold text-base sm:text-lg text-orange-600">₹{request.amount}</div>
                           {request.reason && (
                             <p className="text-xs sm:text-sm text-muted-foreground mt-1 line-clamp-2">
                               {request.reason}
@@ -719,27 +929,31 @@ export default function TeamDetailPage() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <Button
-                          size="sm"
-                          className="flex-1 text-xs sm:text-sm"
-                          onClick={() => handleRespondToRequest(request.id, 'approve')}
-                        >
-                          <Check className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1 text-xs sm:text-sm"
-                          onClick={() => handleRespondToRequest(request.id, 'reject')}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Your balance: ₹{user?.balance || 0}
-                      </p>
+                      {!isOwner && (
+                        <>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <Button
+                              size="sm"
+                              className="flex-1 text-xs sm:text-sm bg-green-600 hover:bg-green-700"
+                              onClick={() => handleRespondToRequest(request.id, 'approve')}
+                            >
+                              <Check className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                              Accept & Pay ₹{request.amount}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 text-xs sm:text-sm border-red-600 text-red-600 hover:bg-red-50"
+                              onClick={() => handleRespondToRequest(request.id, 'reject')}
+                            >
+                              Decline
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground bg-blue-50 p-2 rounded">
+                            💰 Your balance: ₹{user?.balance || 0}
+                          </p>
+                        </>
+                      )}
                     </div>
                   ))}
                 </CardContent>
@@ -995,6 +1209,17 @@ export default function TeamDetailPage() {
                           </DropdownMenuContent>
                         </DropdownMenu>
                       )}
+                      {!isOwner && member.userId !== user?.id && (
+                        <ReportDialog
+                          reportedUserId={member.userId}
+                          reportedUserName={member.user?.username}
+                          trigger={
+                            <Button variant="ghost" size="sm" className="h-8">
+                              <Shield className="h-3 w-3 sm:h-4 sm:w-4 text-red-600" />
+                            </Button>
+                          }
+                        />
+                      )}
                     </div>
                   </div>
                 ))
@@ -1023,6 +1248,11 @@ export default function TeamDetailPage() {
                     <Share2 className="mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                     Generate Invite Code
                   </Button>
+                  <TeamQRDialog 
+                    teamId={teamId} 
+                    teamName={team.name}
+                    className="w-full justify-start text-xs sm:text-sm"
+                  />
                   <Button
                     variant="outline"
                     className="w-full justify-start text-xs sm:text-sm"
@@ -1099,36 +1329,114 @@ export default function TeamDetailPage() {
 
       {/* Add Member Dialog */}
       <Dialog open={isAddMemberOpen} onOpenChange={setIsAddMemberOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Add Team Member</DialogTitle>
+            <DialogTitle>Invite Team Members</DialogTitle>
             <DialogDescription>
-              Enter the user ID or email of the player you want to add
+              Select users to invite to your team
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 flex-1 overflow-hidden flex flex-col">
             <div className="space-y-2">
-              <Label htmlFor="memberEmail">User ID or Email</Label>
+              <Label htmlFor="userSearch">Search Users</Label>
               <Input
-                id="memberEmail"
-                placeholder="Enter user ID or email"
-                value={newMemberEmail}
-                onChange={(e) => setNewMemberEmail(e.target.value)}
+                id="userSearch"
+                placeholder="Search by username, email, or game name..."
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
               />
             </div>
+
+            {isLoadingUsers ? (
+              <div className="flex items-center justify-center py-8">
+                <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto border rounded-lg">
+                <div className="divide-y">
+                  {allUsers
+                    .filter((user) => {
+                      const query = userSearchQuery.toLowerCase();
+                      return (
+                        user.username.toLowerCase().includes(query) ||
+                        user.email.toLowerCase().includes(query) ||
+                        (user.gameName && user.gameName.toLowerCase().includes(query))
+                      );
+                    })
+                    .map((user) => {
+                      const isMember = team.members?.some((m: any) => m.userId === user.id);
+                      const isInvited = invitedUsers.has(user.id);
+
+                      return (
+                        <div
+                          key={user.id}
+                          className="flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <Avatar className="w-10 h-10 shrink-0">
+                              <AvatarImage src={user.avatar} />
+                              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-sm">
+                                {user.username.substring(0, 2).toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-sm truncate">{user.username}</p>
+                              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                              {user.gameName && (
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {user.gameName} {user.gameId && `(${user.gameId})`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="shrink-0">
+                            {isMember ? (
+                              <Badge variant="secondary" className="text-xs">
+                                Member
+                              </Badge>
+                            ) : isInvited ? (
+                              <Badge variant="outline" className="text-xs text-orange-600 border-orange-600">
+                                Invited
+                              </Badge>
+                            ) : (
+                              <Button
+                                size="sm"
+                                onClick={() => handleInviteUser(user.id)}
+                                className="text-xs"
+                              >
+                                <UserPlus className="mr-1 h-3 w-3" />
+                                Invite
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {allUsers.filter((user) => {
+                    const query = userSearchQuery.toLowerCase();
+                    return (
+                      user.username.toLowerCase().includes(query) ||
+                      user.email.toLowerCase().includes(query) ||
+                      (user.gameName && user.gameName.toLowerCase().includes(query))
+                    );
+                  }).length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      {userSearchQuery ? 'No users found matching your search' : 'No users available'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
                 setIsAddMemberOpen(false);
-                setNewMemberEmail("");
+                setUserSearchQuery("");
               }}
             >
-              Cancel
-            </Button>
-            <Button onClick={handleAddMember} disabled={isAddingMember}>
-              {isAddingMember ? "Adding..." : "Add Member"}
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

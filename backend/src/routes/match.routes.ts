@@ -4,6 +4,14 @@ import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
+const canManageMatch = async (match: any, userId: string) => {
+  if (!match?.teamId) return false;
+  const isMember = await prisma.teamMember.findFirst({
+    where: { teamId: match.teamId, userId },
+  });
+  return !!isMember || match.team?.ownerId === userId;
+};
+
 // Get all matches
 router.get('/', authenticate, async (req: any, res) => {
   try {
@@ -192,6 +200,11 @@ router.patch('/:id/status', authenticate, async (req: any, res) => {
       return res.status(404).json({ error: 'Match not found' });
     }
 
+    const allowed = await canManageMatch(match, req.user.id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
     const updatedMatch = await prisma.match.update({
       where: { id: req.params.id },
       data: {
@@ -219,6 +232,11 @@ router.post('/:id/result', authenticate, async (req: any, res) => {
 
     if (!match) {
       return res.status(404).json({ error: 'Match not found' });
+    }
+
+    const allowed = await canManageMatch(match, req.user.id);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Not authorized' });
     }
 
     const updatedMatch = await prisma.match.update({

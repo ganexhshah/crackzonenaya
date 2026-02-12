@@ -132,4 +132,22 @@ export const adminService = {
   async getAnalytics(period: string = '7d'): Promise<any> {
     return api.get(`/admin/analytics?period=${period}`);
   },
+
+  // Support Tickets (admin)
+  async getSupportTickets(params?: { status?: string; category?: string; priority?: string }): Promise<any[]> {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set("status", params.status);
+    if (params?.category) qs.set("category", params.category);
+    if (params?.priority) qs.set("priority", params.priority);
+    const query = qs.toString();
+    return api.get(`/support/admin/tickets${query ? `?${query}` : ""}`);
+  },
+
+  async getSupportTicketById(id: string): Promise<any> {
+    return api.get(`/support/tickets/${id}`);
+  },
+
+  async updateSupportTicket(id: string, patch: { status?: string; priority?: string; assignedToId?: string | null }): Promise<any> {
+    return api.put(`/support/admin/tickets/${id}`, patch);
+  },
 };

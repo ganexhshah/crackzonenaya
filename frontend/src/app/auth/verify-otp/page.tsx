@@ -1,13 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, CheckCircle2 } from "lucide-react";
+import { api } from "@/lib/api";
 
-export default function VerifyOTPPage() {
+function VerifyOTPForm() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const email = searchParams.get('email');
+  
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -66,29 +72,41 @@ export default function VerifyOTPPage() {
       return;
     }
 
+    if (!email) {
+      setError("Email not found. Please register again.");
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
-    // Simulate API call
-    setTimeout(() => {
-      if (otpCode === "123456") {
-        // Success - redirect to profile setup
-        window.location.href = "/profile/setup";
-      } else {
-        setError("Invalid OTP code. Please try again.");
-      }
+    try {
+      await api.post('/auth/verify-otp', { email, otp: otpCode });
+      // Success - redirect to profile setup or dashboard
+      router.push("/profile/setup");
+    } catch (err: any) {
+      setError(err.response?.data?.error || "Invalid OTP code. Please try again.");
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
-  const handleResend = () => {
-    setCanResend(false);
-    setCountdown(60);
-    setOtp(["", "", "", "", "", ""]);
-    setError("");
-    inputRefs.current[0]?.focus();
-    // Simulate resend API call
-    console.log("OTP resent");
+  const handleResend = async () => {
+    if (!email) {
+      setError("Email not found. Please register again.");
+      return;
+    }
+
+    try {
+      await api.post('/auth/resend-otp', { email });
+      setCanResend(false);
+      setCountdown(60);
+      setOtp(["", "", "", "", "", ""]);
+      setError("");
+      inputRefs.current[0]?.focus();
+    } catch (err: any) {
+      setError(err.response?.data?.error || "Failed to resend OTP. Please try again.");
+    }
   };
 
   return (
@@ -102,7 +120,7 @@ export default function VerifyOTPPage() {
           </div>
           <CardTitle className="text-2xl font-bold text-center">Verify OTP</CardTitle>
           <CardDescription className="text-center">
-            We've sent a 6-digit code to your email/phone
+            We've sent a 6-digit code to {email || 'your email'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -165,17 +183,29 @@ export default function VerifyOTPPage() {
             </div>
 
             <p className="text-center text-sm text-gray-600 dark:text-gray-400">
-              Didn't receive the code?{" "}
+              Wrong email?{" "}
               <Link
                 href="/auth/register"
                 className="text-blue-600 hover:text-blue-800 dark:text-blue-400 font-medium"
               >
-                Try another method
+                Register again
               </Link>
             </p>
           </div>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function VerifyOTPPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    }>
+      <VerifyOTPForm />
+    </Suspense>
   );
 }

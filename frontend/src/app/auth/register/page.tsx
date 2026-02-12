@@ -53,7 +53,11 @@ export default function RegisterPage() {
       setError("Full name is required");
       return false;
     }
-    if (!formData.username.trim() || formData.username.length < 3) {
+    if (!formData.username.trim()) {
+      setError("Username is required");
+      return false;
+    }
+    if (formData.username.length < 3) {
       setError("Username must be at least 3 characters");
       return false;
     }
@@ -137,7 +141,7 @@ export default function RegisterPage() {
                 <Input
                   id="username"
                   type="text"
-                  placeholder="Choose a username"
+                  placeholder="Choose a username (min 3 characters)"
                   className="pl-10"
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}

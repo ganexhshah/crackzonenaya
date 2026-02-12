@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,9 +10,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Eye, EyeOff, Loader2, Lock, CheckCircle2 } from "lucide-react";
+import { api } from "@/lib/api";
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get('token');
+  
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,8 +52,8 @@ export default function ResetPasswordPage() {
 
     if (!formData.newPassword) {
       newErrors.newPassword = "Password is required";
-    } else if (formData.newPassword.length < 8) {
-      newErrors.newPassword = "Password must be at least 8 characters";
+    } else if (formData.newPassword.length < 6) {
+      newErrors.newPassword = "Password must be at least 6 characters";
     }
 
     if (formData.newPassword !== formData.confirmPassword) {
@@ -65,18 +69,32 @@ export default function ResetPasswordPage() {
 
     if (!validateForm()) return;
 
+    if (!token) {
+      setErrors({ newPassword: "Invalid or missing reset token" });
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      await api.post('/auth/reset-password', {
+        token,
+        password: formData.newPassword,
+      });
+      
       setIsSuccess(true);
-      setIsLoading(false);
 
       // Redirect to login after 2 seconds
       setTimeout(() => {
         router.push("/auth/login");
       }, 2000);
-    }, 1500);
+    } catch (err: any) {
+      setErrors({ 
+        newPassword: err.response?.data?.error || "Failed to reset password. Please try again." 
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isSuccess) {
@@ -124,7 +142,7 @@ export default function ResetPasswordPage() {
                 <Input
                   id="newPassword"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Enter new password (min 8 characters)"
+                  placeholder="Enter new password (min 6 characters)"
                   className="pl-10 pr-10"
                   value={formData.newPassword}
                   onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
@@ -184,9 +202,9 @@ export default function ResetPasswordPage() {
               <AlertDescription className="text-sm">
                 <strong>Password requirements:</strong>
                 <ul className="list-disc list-inside mt-2 space-y-1">
-                  <li>At least 8 characters long</li>
-                  <li>Mix of uppercase and lowercase letters</li>
-                  <li>Include numbers and special characters</li>
+                  <li>At least 6 characters long</li>
+                  <li>Mix of uppercase and lowercase letters recommended</li>
+                  <li>Include numbers and special characters for better security</li>
                 </ul>
               </AlertDescription>
             </Alert>
@@ -205,5 +223,17 @@ export default function ResetPasswordPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+      </div>
+    }>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }

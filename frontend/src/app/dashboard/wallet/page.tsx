@@ -33,6 +33,10 @@ import {
 import { walletService, WalletData, Transaction } from "@/services/wallet.service";
 import { paymentMethodService, PaymentMethod } from "@/services/payment-method.service";
 import { toast } from "sonner";
+import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+
+const WALLET_CACHE_KEY = "dashboard:wallet";
+const WALLET_CACHE_TTL_MS = 2 * 60 * 1000;
 
 export default function WalletPage() {
   const [walletData, setWalletData] = useState<WalletData>({
@@ -47,7 +51,17 @@ export default function WalletPage() {
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
   useEffect(() => {
-    fetchWalletData();
+    const cached = getCachedPageData<{ walletData: WalletData; transactions: Transaction[] }>(
+      WALLET_CACHE_KEY,
+      WALLET_CACHE_TTL_MS
+    );
+    if (cached) {
+      setWalletData(cached.walletData);
+      setTransactions(cached.transactions);
+      void fetchWalletData();
+      return;
+    }
+    void fetchWalletData();
   }, []);
 
   const fetchWalletData = async () => {
@@ -58,6 +72,7 @@ export default function WalletPage() {
       ]);
       setWalletData(wallet);
       setTransactions(txns);
+      setCachedPageData(WALLET_CACHE_KEY, { walletData: wallet, transactions: txns });
     } catch (error: any) {
       console.error('Failed to fetch wallet data:', error);
       toast.error('Failed to load wallet data');
@@ -122,15 +137,15 @@ export default function WalletPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
             <Dialog open={isAddMoneyOpen} onOpenChange={setIsAddMoneyOpen}>
               <DialogTrigger asChild>
-                <Button variant="secondary" className="w-full text-sm sm:text-base">
+                <Button variant="secondary" className="w-full h-11 sm:h-10 text-sm sm:text-base">
                   <Plus className="mr-1 sm:mr-2 h-4 w-4" />
                   Add Money
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md mx-4">
+              <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
                 <AddMoneyDialog 
                   onClose={() => {
                     setIsAddMoneyOpen(false);
@@ -142,12 +157,12 @@ export default function WalletPage() {
 
             <Dialog open={isWithdrawOpen} onOpenChange={setIsWithdrawOpen}>
               <DialogTrigger asChild>
-                <Button variant="secondary" className="w-full text-sm sm:text-base">
+                <Button variant="secondary" className="w-full h-11 sm:h-10 text-sm sm:text-base">
                   <Minus className="mr-1 sm:mr-2 h-4 w-4" />
                   Withdraw
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md mx-4">
+              <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
                 <WithdrawDialog 
                   onClose={() => {
                     setIsWithdrawOpen(false);
@@ -426,6 +441,7 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [screenshotPreviewUrl, setScreenshotPreviewUrl] = useState<string | null>(null);
   const [transactionId, setTransactionId] = useState("");
   const [step, setStep] = useState<"amount" | "payment" | "success">("amount");
   const [submitting, setSubmitting] = useState(false);
@@ -459,9 +475,21 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
         return;
       }
 
+      if (screenshotPreviewUrl) {
+        URL.revokeObjectURL(screenshotPreviewUrl);
+      }
       setScreenshot(file);
+      setScreenshotPreviewUrl(URL.createObjectURL(file));
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (screenshotPreviewUrl) {
+        URL.revokeObjectURL(screenshotPreviewUrl);
+      }
+    };
+  }, [screenshotPreviewUrl]);
 
   const handleSubmit = async () => {
     if (!screenshot || !transactionId) {
@@ -567,7 +595,13 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setScreenshot(null)}
+                      onClick={() => {
+                        if (screenshotPreviewUrl) {
+                          URL.revokeObjectURL(screenshotPreviewUrl);
+                        }
+                        setScreenshot(null);
+                        setScreenshotPreviewUrl(null);
+                      }}
                     >
                       <XCircle className="h-4 w-4" />
                     </Button>
@@ -575,6 +609,15 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                   <p className="text-xs text-muted-foreground">
                     {(screenshot.size / 1024).toFixed(2)} KB
                   </p>
+                  {screenshotPreviewUrl && (
+                    <div className="mt-3 border rounded-md overflow-hidden bg-background">
+                      <img
+                        src={screenshotPreviewUrl}
+                        alt="Selected payment screenshot preview"
+                        className="w-full max-h-56 object-contain"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (

@@ -10,7 +10,14 @@ const prisma = new PrismaClient();
 // Configure multer for memory storage
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Only image files are allowed'));
+  }
 });
 
 // Middleware to check admin role
@@ -30,7 +37,7 @@ router.get('/active', async (req, res) => {
     });
     res.json(methods);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -42,7 +49,7 @@ router.get('/', authenticate, isAdmin, async (req, res) => {
     });
     res.json(methods);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -85,7 +92,7 @@ router.post('/', authenticate, isAdmin, upload.single('qrCode'), async (req, res
     res.status(201).json(method);
   } catch (error: any) {
     console.error('Error creating payment method:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -139,7 +146,7 @@ router.put('/:id', authenticate, isAdmin, upload.single('qrCode'), async (req, r
     res.json(method);
   } catch (error: any) {
     console.error('Error updating payment method:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -163,7 +170,7 @@ router.patch('/:id/toggle', authenticate, isAdmin, async (req, res) => {
 
     res.json(updated);
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
@@ -192,7 +199,7 @@ router.delete('/:id', authenticate, isAdmin, async (req, res) => {
 
     res.json({ message: 'Payment method deleted successfully' });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

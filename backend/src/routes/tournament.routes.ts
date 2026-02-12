@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { authenticate, authorize } from '../middleware/auth';
 import { upload } from '../middleware/upload';
@@ -131,23 +132,6 @@ router.post('/:id/register', authenticate, async (req: any, res) => {
   try {
     const { teamId } = req.body;
 
-    const tournament = await prisma.tournament.findUnique({
-      where: { id: req.params.id },
-      include: { _count: { select: { registrations: true } } },
-    });
-
-    if (!tournament) {
-      return res.status(404).json({ error: 'Tournament not found' });
-    }
-
-    if (tournament.status !== 'REGISTRATION_OPEN') {
-      return res.status(400).json({ error: 'Registration is not open' });
-    }
-
-    if (tournament._count.registrations >= tournament.maxTeams) {
-      return res.status(400).json({ error: 'Tournament is full' });
-    }
-
     const team = await prisma.team.findUnique({ where: { id: teamId } });
     if (!team) {
       return res.status(404).json({ error: 'Team not found' });
@@ -161,34 +145,58 @@ router.post('/:id/register', authenticate, async (req: any, res) => {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    const existingRegistration = await prisma.tournamentRegistration.findUnique({
-      where: {
-        tournamentId_teamId: {
-          tournamentId: req.params.id,
-          teamId,
-        },
-      },
-    });
+    const registration = await prisma.$transaction(
+      async (tx) => {
+        const tournament = await tx.tournament.findUnique({
+          where: { id: req.params.id },
+          include: { _count: { select: { registrations: true } } },
+        });
+        if (!tournament) {
+          throw new Error('TOURNAMENT_NOT_FOUND');
+        }
+        if (tournament.status !== 'REGISTRATION_OPEN') {
+          throw new Error('REGISTRATION_CLOSED');
+        }
+        if (tournament._count.registrations >= tournament.maxTeams) {
+          throw new Error('TOURNAMENT_FULL');
+        }
 
-    if (existingRegistration) {
-      return res.status(400).json({ error: 'Team already registered' });
-    }
+        const existingRegistration = await tx.tournamentRegistration.findUnique({
+          where: {
+            tournamentId_teamId: {
+              tournamentId: req.params.id,
+              teamId,
+            },
+          },
+        });
+        if (existingRegistration) {
+          throw new Error('ALREADY_REGISTERED');
+        }
 
-    const registration = await prisma.tournamentRegistration.create({
-      data: {
-        tournamentId: req.params.id,
-        teamId,
-        userId: req.user.id,
-        paymentStatus: tournament.entryFee > 0 ? 'PENDING' : 'COMPLETED',
+        return tx.tournamentRegistration.create({
+          data: {
+            tournamentId: req.params.id,
+            teamId,
+            userId: req.user.id,
+            paymentStatus: tournament.entryFee > 0 ? 'PENDING' : 'COMPLETED',
+          },
+          include: {
+            team: true,
+            tournament: true,
+          },
+        });
       },
-      include: {
-        team: true,
-        tournament: true,
-      },
-    });
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    );
 
     res.status(201).json(registration);
   } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === 'TOURNAMENT_NOT_FOUND') return res.status(404).json({ error: 'Tournament not found' });
+      if (error.message === 'REGISTRATION_CLOSED') return res.status(400).json({ error: 'Registration is not open' });
+      if (error.message === 'TOURNAMENT_FULL') return res.status(400).json({ error: 'Tournament is full' });
+      if (error.message === 'ALREADY_REGISTERED') return res.status(400).json({ error: 'Team already registered' });
+    }
     res.status(500).json({ error: 'Server error' });
   }
 });
