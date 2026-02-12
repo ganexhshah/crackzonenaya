@@ -13,6 +13,7 @@ import {
   FileText,
   BarChart3,
   LifeBuoy,
+  Swords,
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
@@ -70,6 +71,11 @@ const menuItems = [
     title: "Support Tickets",
     icon: LifeBuoy,
     href: "/admin/support/tickets",
+  },
+  {
+    title: "Custom Matches",
+    icon: Swords,
+    href: "/admin/custom-matches",
   },
   {
     title: "Announcements",

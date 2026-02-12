@@ -21,6 +21,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { CustomRoomDetailsDialog } from "@/components/custom-rooms/custom-room-details-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
 export default function CustomMatchesPage() {
   const router = useRouter();
@@ -31,6 +36,13 @@ export default function CustomMatchesPage() {
   const [openRooms, setOpenRooms] = useState<CustomRoom[]>([]);
   const [joinRoomTarget, setJoinRoomTarget] = useState<CustomRoom | null>(null);
   const [joinedRoomIds, setJoinedRoomIds] = useState<Set<string>>(new Set());
+  const [manageRoomTarget, setManageRoomTarget] = useState<CustomRoom | null>(null);
+  const [manageRoomId, setManageRoomId] = useState("");
+  const [manageRoomPassword, setManageRoomPassword] = useState("");
+  const [manageWinnerSide, setManageWinnerSide] = useState<"CREATOR" | "OPPONENT">("CREATOR");
+  const [manageScreenshot, setManageScreenshot] = useState<File | null>(null);
+  const [savingRoomDetails, setSavingRoomDetails] = useState(false);
+  const [submittingResult, setSubmittingResult] = useState(false);
 
   const loadMy = async () => {
     try {
@@ -61,6 +73,21 @@ export default function CustomMatchesPage() {
   }, []);
 
   const balance = Number(user?.balance || 0);
+
+  const isRoomMaker = (r: CustomRoom) => {
+    const uid = user?.id;
+    if (!uid) return false;
+    if (r.roomMaker === "ME") return r.creatorId === uid;
+    return r.opponentId === uid;
+  };
+
+  const openManage = (r: CustomRoom) => {
+    setManageRoomTarget(r);
+    setManageRoomId(r.roomId || "");
+    setManageRoomPassword(r.roomPassword || "");
+    setManageWinnerSide("CREATOR");
+    setManageScreenshot(null);
+  };
 
   return (
     <div className="p-4 md:p-6 lg:p-8 space-y-6">
@@ -168,6 +195,9 @@ export default function CustomMatchesPage() {
                           room={r}
                           trigger={<Button size="sm" variant="outline">Details</Button>}
                         />
+                        <Button size="sm" onClick={() => openManage(r)}>
+                          Manage
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -177,6 +207,159 @@ export default function CustomMatchesPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={!!manageRoomTarget} onOpenChange={(o) => !o && setManageRoomTarget(null)}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-[720px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Manage Room</DialogTitle>
+          </DialogHeader>
+
+          {!manageRoomTarget ? null : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline">{manageRoomTarget.type}</Badge>
+                <Badge variant="outline">{manageRoomTarget.teamSize}</Badge>
+                <Badge variant="outline">{manageRoomTarget.rounds} rounds</Badge>
+                <Badge>{manageRoomTarget.status}</Badge>
+              </div>
+
+              {manageRoomTarget.status === "READY_TO_START" && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Start</CardTitle>
+                    <CardDescription>Both players must click Ready to start.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button
+                      className="w-full"
+                      onClick={async () => {
+                        try {
+                          await customRoomService.ready(manageRoomTarget.id);
+                          toast.success("Ready sent");
+                          await loadMy();
+                        } catch (e: any) {
+                          toast.error(e?.message || "Failed");
+                        }
+                      }}
+                    >
+                      I’m Ready
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+
+              {manageRoomTarget.status === "STARTED" && (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Room Details</CardTitle>
+                      <CardDescription>Only the room maker can set Room ID and Password.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {!isRoomMaker(manageRoomTarget) ? (
+                        <div className="text-sm text-muted-foreground">Waiting for room maker to set Room ID/Password.</div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <Label>Room ID</Label>
+                              <Input value={manageRoomId} onChange={(e) => setManageRoomId(e.target.value)} />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Password</Label>
+                              <Input value={manageRoomPassword} onChange={(e) => setManageRoomPassword(e.target.value)} />
+                            </div>
+                          </div>
+                          <Button
+                            className="w-full"
+                            variant="outline"
+                            disabled={savingRoomDetails}
+                            onClick={async () => {
+                              try {
+                                setSavingRoomDetails(true);
+                                await customRoomService.setRoomDetails(manageRoomTarget.id, {
+                                  roomId: manageRoomId,
+                                  roomPassword: manageRoomPassword || undefined,
+                                });
+                                toast.success("Room details saved");
+                                await loadMy();
+                              } catch (e: any) {
+                                toast.error(e?.message || "Failed to save");
+                              } finally {
+                                setSavingRoomDetails(false);
+                              }
+                            }}
+                          >
+                            {savingRoomDetails ? "Saving..." : "Save Room Details"}
+                          </Button>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Separator />
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Stop (Submit Result)</CardTitle>
+                      <CardDescription>
+                        Room maker uploads match screenshot and selects winner. Admin will verify and payout.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {!isRoomMaker(manageRoomTarget) ? (
+                        <div className="text-sm text-muted-foreground">Only the room maker can submit result.</div>
+                      ) : (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Winner</Label>
+                            <Select value={manageWinnerSide} onValueChange={(v) => setManageWinnerSide(v as any)}>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="CREATOR">Creator</SelectItem>
+                                <SelectItem value="OPPONENT">Opponent</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Screenshot</Label>
+                            <Input type="file" accept="image/*" onChange={(e) => setManageScreenshot((e.target.files || [])[0] || null)} />
+                          </div>
+                          <Button
+                            className="w-full"
+                            disabled={submittingResult || !manageScreenshot}
+                            onClick={async () => {
+                              if (!manageScreenshot) return;
+                              try {
+                                setSubmittingResult(true);
+                                await customRoomService.submitResult(manageRoomTarget.id, {
+                                  winnerSide: manageWinnerSide,
+                                  screenshot: manageScreenshot,
+                                });
+                                toast.success("Result submitted for verification");
+                                setManageRoomTarget(null);
+                                await loadMy();
+                              } catch (e: any) {
+                                toast.error(e?.message || "Failed to submit");
+                              } finally {
+                                setSubmittingResult(false);
+                              }
+                            }}
+                          >
+                            {submittingResult ? "Submitting..." : "Submit Result"}
+                          </Button>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!joinRoomTarget} onOpenChange={(o) => !o && setJoinRoomTarget(null)}>
         <AlertDialogContent>

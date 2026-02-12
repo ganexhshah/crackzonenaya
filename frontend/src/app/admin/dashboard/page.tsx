@@ -20,6 +20,7 @@ import {
   TrendingDown,
   AlertCircle,
   RefreshCw,
+  Swords,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { adminService } from "@/services/admin.service";
@@ -134,12 +135,20 @@ export default function AdminDashboardPage() {
       color: "text-pink-600",
       bgColor: "bg-pink-100",
     },
+    {
+      title: "Custom Matches",
+      value: "Review",
+      icon: Swords,
+      color: "text-indigo-600",
+      bgColor: "bg-indigo-100",
+    },
   ];
 
   const quickActions = [
     { label: "Create Tournament", icon: Plus, href: "/admin/scrims/create" },
     { label: "Manage Scrims", icon: Upload, href: "/admin/scrims" },
     { label: "View Reports", icon: FileCheck, href: "/admin/reports" },
+    { label: "Review Custom", icon: Swords, href: "/admin/custom-matches" },
     { label: "Send Announcement", icon: Send, href: "/admin/announcements" },
   ];
 

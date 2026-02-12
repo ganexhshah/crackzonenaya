@@ -812,7 +812,7 @@ export default function DashboardPage() {
                       )}
                       {r.status === "STARTED" && (
                         <Button size="sm" asChild>
-                          <Link href="/dashboard/matches">Open Matches</Link>
+                          <Link href="/dashboard/custom-matches">Manage</Link>
                         </Button>
                       )}
                     </div>

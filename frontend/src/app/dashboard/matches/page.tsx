@@ -34,6 +34,8 @@ export default function MatchesPage() {
   const [openRooms, setOpenRooms] = useState<CustomRoom[]>([]);
   const [joinRoomTarget, setJoinRoomTarget] = useState<CustomRoom | null>(null);
   const [joinedRoomIds, setJoinedRoomIds] = useState<Set<string>>(new Set());
+  const [myRoomsLoading, setMyRoomsLoading] = useState(true);
+  const [myRooms, setMyRooms] = useState<CustomRoom[]>([]);
 
   const categorizedMatches = useMemo(() => {
     const now = new Date();
@@ -68,6 +70,21 @@ export default function MatchesPage() {
       }
     };
     void load();
+  }, []);
+
+  useEffect(() => {
+    const loadMine = async () => {
+      try {
+        setMyRoomsLoading(true);
+        const rooms = await customRoomService.listMyRooms();
+        setMyRooms(Array.isArray(rooms) ? rooms : []);
+      } catch (e: any) {
+        setMyRooms([]);
+      } finally {
+        setMyRoomsLoading(false);
+      }
+    };
+    void loadMine();
   }, []);
 
   return (
@@ -122,6 +139,67 @@ export default function MatchesPage() {
                           Join
                         </Button>
                       )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* My Custom Rooms */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">My Custom Rooms</CardTitle>
+          <CardDescription>Rooms you created or joined (manage start/result here)</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {myRoomsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading...</div>
+          ) : myRooms.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No custom rooms yet.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {myRooms.slice(0, 6).map((r) => (
+                <div key={r.id} className="rounded-lg border p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold truncate">
+                        {r.type === "CUSTOM_ROOM" ? "Custom Room" : "Lone Wolf"} • {r.rounds} rounds
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Opponent: {r.opponent?.username || "Waiting..."} • Entry ₹{Number(r.entryFee || 0).toFixed(0)} • Payout ₹{Number(r.payout || 0).toFixed(0)}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <Badge variant="outline">{r.teamSize}</Badge>
+                        <Badge variant="outline">{r.status}</Badge>
+                      </div>
+                      {(r.roomId || r.roomPassword) && (
+                        <div className="mt-2 rounded-md bg-muted p-2 text-xs">
+                          {r.roomId && (
+                            <div>
+                              <span className="text-muted-foreground">Room ID:</span>{" "}
+                              <span className="font-mono font-semibold">{r.roomId}</span>
+                            </div>
+                          )}
+                          {r.roomPassword && (
+                            <div>
+                              <span className="text-muted-foreground">Password:</span>{" "}
+                              <span className="font-mono font-semibold">{r.roomPassword}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <CustomRoomDetailsDialog
+                        room={r}
+                        trigger={<Button size="sm" variant="outline">Details</Button>}
+                      />
+                      <Button size="sm" onClick={() => router.push("/dashboard/custom-matches")}>
+                        Manage
+                      </Button>
                     </div>
                   </div>
                 </div>
