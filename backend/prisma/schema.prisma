@@ -43,6 +43,11 @@ model User {
   reportsReceived Report[] @relation("ReportsReceived")
   reportsReviewed Report[] @relation("ReportsReviewed")
   contactMessages ContactMessage[]
+  
+  friendsInitiated Friend[] @relation("FriendsInitiated")
+  friendsReceived  Friend[] @relation("FriendsReceived")
+  messagesSent     Message[] @relation("MessagesSent")
+  messagesReceived Message[] @relation("MessagesReceived")
 
   customRoomsCreated CustomRoom[] @relation("CustomRoomCreator")
   customRoomsJoined  CustomRoom[] @relation("CustomRoomOpponent")
@@ -668,4 +673,44 @@ enum MessageStatus {
   UNREAD
   READ
   REPLIED
+}
+
+model Friend {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation("FriendsInitiated", fields: [userId], references: [id], onDelete: Cascade)
+  friendId      String
+  friend        User      @relation("FriendsReceived", fields: [friendId], references: [id], onDelete: Cascade)
+  status        FriendStatus @default(PENDING)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@unique([userId, friendId])
+  @@index([userId])
+  @@index([friendId])
+  @@index([status])
+}
+
+enum FriendStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
+
+model Message {
+  id            String    @id @default(cuid())
+  senderId      String
+  sender        User      @relation("MessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId    String
+  receiver      User      @relation("MessagesReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+  content       String
+  read          Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([read])
+  @@index([createdAt])
 }

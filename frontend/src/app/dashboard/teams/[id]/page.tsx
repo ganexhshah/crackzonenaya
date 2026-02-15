@@ -660,31 +660,31 @@ export default function TeamDetailPage() {
           </div>
         )}
         
-        <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto gap-1 p-1">
-          <TabsTrigger value="overview" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+        <TabsList className={`w-full grid ${isOwner ? 'grid-cols-4' : 'grid-cols-3'} h-auto gap-1 p-1`}>
+          <TabsTrigger value="overview" className="text-xs sm:text-sm py-2 px-1 sm:px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <span className="hidden sm:inline">Overview</span>
             <span className="sm:hidden">Info</span>
           </TabsTrigger>
-          <TabsTrigger value="wallet" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground relative">
+          <TabsTrigger value="wallet" className="text-xs sm:text-sm py-2 px-1 sm:px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground relative">
             <Wallet className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">Wallet</span>
-            <span className="sm:hidden truncate">Wallet</span>
+            <span className="sm:hidden">Wallet</span>
             {!isOwner && pendingRequests.length > 0 && (
               <span className="absolute -top-1 -right-1 bg-orange-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
                 {pendingRequests.length}
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="members" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+          <TabsTrigger value="members" className="text-xs sm:text-sm py-2 px-1 sm:px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
             <Users className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">Members ({team.members?.length || 0})</span>
             <span className="sm:hidden">({team.members?.length || 0})</span>
           </TabsTrigger>
           {isOwner && (
-            <TabsTrigger value="management" className="text-xs sm:text-sm py-2 px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            <TabsTrigger value="management" className="text-xs sm:text-sm py-2 px-1 sm:px-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
               <Shield className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
               <span className="hidden sm:inline">Management</span>
-              <span className="sm:hidden truncate">Manage</span>
+              <span className="sm:hidden">Manage</span>
             </TabsTrigger>
           )}
         </TabsList>

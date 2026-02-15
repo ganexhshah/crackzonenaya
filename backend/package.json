@@ -12,7 +12,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "ts-node prisma/seed.ts",
+    "reset": "ts-node reset-database.ts",
+    "reset:safe": "ts-node reset-database-safe.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

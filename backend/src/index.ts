@@ -19,6 +19,8 @@ import supportRoutes from './routes/support.routes';
 import testEmailRoutes from './routes/test-email.routes';
 import notificationRoutes from './routes/notification.routes';
 import customRoomsRoutes from './routes/custom-rooms.routes';
+import friendRoutes from './routes/friend.routes';
+import messageRoutes from './routes/message.routes';
 
 dotenv.config();
 
@@ -69,6 +71,8 @@ app.use('/api/support', supportRoutes);
 app.use('/api/test-email', testEmailRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/custom-rooms', customRoomsRoutes);
+app.use('/api/friends', friendRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

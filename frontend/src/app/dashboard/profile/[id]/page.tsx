@@ -31,7 +31,8 @@ import {
   Save,
   X,
   Copy,
-  Check
+  Check,
+  Send
 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -41,6 +42,8 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+import { friendService } from "@/services/friend.service";
+import { messageService } from "@/services/message.service";
 
 const PROFILE_PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -99,6 +102,13 @@ export default function UserProfilePage() {
   });
   const [saving, setSaving] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [friendStatus, setFriendStatus] = useState<'none' | 'pending' | 'accepted'>('none');
+  const [friendRequestId, setFriendRequestId] = useState<string | undefined>();
+  const [isLoadingFriendStatus, setIsLoadingFriendStatus] = useState(false);
+  const [isSendingRequest, setIsSendingRequest] = useState(false);
+  const [isMessageDialogOpen, setIsMessageDialogOpen] = useState(false);
+  const [messageContent, setMessageContent] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
   const userId = params.id as string;
 
   useEffect(() => {
@@ -112,8 +122,13 @@ export default function UserProfilePage() {
       } else {
         void fetchUserProfile();
       }
+      
+      // Fetch friend status if not own profile
+      if (currentUser && userId !== currentUser.id) {
+        void fetchFriendStatus();
+      }
     }
-  }, [userId]);
+  }, [userId, currentUser]);
 
   useEffect(() => {
     if (profile?.profile) {
@@ -146,6 +161,19 @@ export default function UserProfilePage() {
       toast.error('Failed to load user profile');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFriendStatus = async () => {
+    try {
+      setIsLoadingFriendStatus(true);
+      const status = await friendService.checkFriendStatus(userId);
+      setFriendStatus(status.status);
+      setFriendRequestId(status.requestId);
+    } catch (error: any) {
+      console.error('Failed to fetch friend status:', error);
+    } finally {
+      setIsLoadingFriendStatus(false);
     }
   };
 
@@ -182,11 +210,51 @@ export default function UserProfilePage() {
     : 0;
 
   const handleSendMessage = () => {
-    toast.info("Messaging feature coming soon!");
+    setIsMessageDialogOpen(true);
   };
 
-  const handleAddFriend = () => {
-    toast.info("Friend system coming soon!");
+  const handleAddFriend = async () => {
+    if (friendStatus === 'accepted') {
+      toast.info('You are already friends!');
+      return;
+    }
+    
+    if (friendStatus === 'pending') {
+      toast.info('Friend request already sent!');
+      return;
+    }
+
+    setIsSendingRequest(true);
+    try {
+      await friendService.sendFriendRequest(userId);
+      toast.success('Friend request sent!');
+      setFriendStatus('pending');
+    } catch (error: any) {
+      console.error('Failed to send friend request:', error);
+      toast.error(error.response?.data?.error || 'Failed to send friend request');
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  const handleSendMessageSubmit = async () => {
+    if (!messageContent.trim()) {
+      toast.error('Please enter a message');
+      return;
+    }
+
+    setIsSendingMessage(true);
+    try {
+      await messageService.sendMessage(userId, messageContent);
+      toast.success('Message sent successfully!');
+      setMessageContent('');
+      setIsMessageDialogOpen(false);
+    } catch (error: any) {
+      console.error('Failed to send message:', error);
+      toast.error(error.response?.data?.error || 'Failed to send message');
+    } finally {
+      setIsSendingMessage(false);
+    }
   };
 
   const handleSaveSocialHandles = async () => {
@@ -444,13 +512,60 @@ export default function UserProfilePage() {
                   </>
                 ) : (
                   <>
-                    <Button onClick={handleSendMessage}>
-                      <MessageCircle className="mr-2 h-4 w-4" />
-                      Send Message
-                    </Button>
-                    <Button variant="outline" onClick={handleAddFriend}>
+                    <Dialog open={isMessageDialogOpen} onOpenChange={setIsMessageDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button onClick={handleSendMessage}>
+                          <MessageCircle className="mr-2 h-4 w-4" />
+                          Send Message
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Send Message to {profile.username}</DialogTitle>
+                          <DialogDescription>
+                            Send a direct message to this user
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="message">Message</Label>
+                            <Textarea
+                              id="message"
+                              placeholder="Type your message here..."
+                              value={messageContent}
+                              onChange={(e) => setMessageContent(e.target.value)}
+                              rows={5}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <Button 
+                            variant="outline" 
+                            onClick={() => setIsMessageDialogOpen(false)} 
+                            disabled={isSendingMessage}
+                          >
+                            Cancel
+                          </Button>
+                          <Button 
+                            onClick={handleSendMessageSubmit} 
+                            disabled={isSendingMessage || !messageContent.trim()}
+                          >
+                            <Send className="h-4 w-4 mr-2" />
+                            {isSendingMessage ? 'Sending...' : 'Send Message'}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                    
+                    <Button 
+                      variant="outline" 
+                      onClick={handleAddFriend}
+                      disabled={isSendingRequest || isLoadingFriendStatus}
+                    >
                       <Users className="mr-2 h-4 w-4" />
-                      Add Friend
+                      {friendStatus === 'accepted' ? 'Friends' : 
+                       friendStatus === 'pending' ? 'Request Sent' : 
+                       isSendingRequest ? 'Sending...' : 'Add Friend'}
                     </Button>
                   </>
                 )}

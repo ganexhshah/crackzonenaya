@@ -274,26 +274,28 @@ export default function WalletPage() {
 
       {/* Receipt Preview Dialog */}
       <Dialog open={!!selectedReceipt} onOpenChange={() => setSelectedReceipt(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl">Transaction Receipt</DialogTitle>
-            <DialogDescription className="text-xs sm:text-sm">Transaction ID: {selectedReceipt?.reference}</DialogDescription>
+            <DialogTitle className="text-base sm:text-lg md:text-xl">Transaction Receipt</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm break-all">
+              Transaction ID: {selectedReceipt?.reference}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 text-sm">
-              <div>
+          <div className="space-y-4 sm:space-y-5">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1">
                 <p className="text-muted-foreground text-xs sm:text-sm">Type</p>
-                <p className="font-medium capitalize">{selectedReceipt?.type}</p>
+                <p className="font-medium text-sm sm:text-base capitalize">{selectedReceipt?.type}</p>
               </div>
-              <div>
+              <div className="space-y-1">
                 <p className="text-muted-foreground text-xs sm:text-sm">Amount</p>
-                <p className="font-medium">रु {Math.abs(selectedReceipt?.amount || 0)}</p>
+                <p className="font-medium text-sm sm:text-base">रु {Math.abs(selectedReceipt?.amount || 0)}</p>
               </div>
-              <div>
+              <div className="space-y-1">
                 <p className="text-muted-foreground text-xs sm:text-sm">Method</p>
-                <p className="font-medium truncate">{selectedReceipt?.method}</p>
+                <p className="font-medium text-sm sm:text-base truncate">{selectedReceipt?.method}</p>
               </div>
-              <div>
+              <div className="space-y-1">
                 <p className="text-muted-foreground text-xs sm:text-sm">Status</p>
                 <Badge
                   variant={
@@ -303,50 +305,51 @@ export default function WalletPage() {
                       ? "secondary"
                       : "destructive"
                   }
+                  className="text-xs"
                 >
                   {selectedReceipt?.status}
                 </Badge>
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 space-y-1">
                 <p className="text-muted-foreground text-xs sm:text-sm">Date</p>
-                <p className="font-medium">{formatDate(selectedReceipt?.date)}</p>
+                <p className="font-medium text-sm sm:text-base">{formatDate(selectedReceipt?.date)}</p>
               </div>
             </div>
 
             {/* Payment Screenshot */}
             {selectedReceipt?.receiptUrl && (
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Payment Screenshot</p>
-                <div className="border rounded-lg overflow-hidden bg-muted/50">
+              <div className="space-y-2 sm:space-y-3">
+                <p className="text-sm sm:text-base font-medium">Payment Screenshot</p>
+                <div className="border-2 rounded-lg overflow-hidden bg-muted/30">
                   <img
                     src={selectedReceipt.receiptUrl}
                     alt="Payment Receipt"
-                    className="w-full h-auto max-h-96 object-contain"
+                    className="w-full h-auto object-contain"
                   />
                 </div>
                 <a
                   href={selectedReceipt.receiptUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                  className="text-xs sm:text-sm text-blue-600 hover:underline flex items-center gap-1.5 pt-1"
                 >
-                  <Upload className="w-4 h-4" />
-                  Open in new tab
+                  <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 flex-shrink-0" />
+                  <span>Open in new tab</span>
                 </a>
               </div>
             )}
 
             {/* Report Issue */}
             {selectedReceipt?.status === "Pending" && (
-              <div className="pt-4 border-t">
+              <div className="pt-3 sm:pt-4 border-t">
                 <Button
                   variant="outline"
-                  className="w-full"
+                  className="w-full h-10 sm:h-11 text-sm sm:text-base"
                   onClick={() => {
                     toast.info("Report feature coming soon. Please contact support for urgent issues.");
                   }}
                 >
-                  <AlertCircle className="w-4 h-4 mr-2" />
+                  <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0" />
                   Report an Issue
                 </Button>
               </div>
@@ -613,8 +616,8 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                     <div className="mt-3 border rounded-md overflow-hidden bg-background">
                       <img
                         src={screenshotPreviewUrl}
-                        alt="Selected payment screenshot preview"
-                        className="w-full max-h-56 object-contain"
+                        alt="Payment screenshot preview"
+                        className="w-full h-auto object-contain"
                       />
                     </div>
                   )}
