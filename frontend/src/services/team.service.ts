@@ -111,4 +111,21 @@ export const teamService = {
   async getTeamInvitations(teamId: string): Promise<any[]> {
     return api.get(`/teams/${teamId}/invitations`);
   },
+
+  // Admin methods
+  async adminGetAllTeams(): Promise<Team[]> {
+    return api.get('/admin/teams');
+  },
+
+  async adminGetTeamStats(): Promise<{ total: number; active: number; inactive: number }> {
+    return api.get('/admin/teams/stats');
+  },
+
+  async adminUpdateTeamStatus(teamId: string, isActive: boolean): Promise<Team> {
+    return api.patch(`/admin/teams/${teamId}/status`, { isActive });
+  },
+
+  async adminDeleteTeam(teamId: string): Promise<{ message: string }> {
+    return api.delete(`/admin/teams/${teamId}`);
+  },
 };

@@ -467,6 +467,11 @@ router.post('/google', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Check if profile is complete (has essential gaming info)
+    const hasCompleteProfile = user.profile && 
+      user.profile.gameId && 
+      user.profile.gameUsername;
+
     res.json({
       token,
       user: {
@@ -479,7 +484,7 @@ router.post('/google', async (req, res) => {
         isVerified: user.isVerified,
       },
       isNewUser,
-      hasProfile: !!user.profile
+      hasProfile: hasCompleteProfile
     });
   } catch (error) {
     console.error('Google auth error:', error);

@@ -5,6 +5,7 @@ import multer from 'multer';
 import { uploadToCloudinary } from '../utils/cloudinary';
 import { sendEmail } from '../config/email';
 import { createRateLimit } from '../middleware/rateLimit';
+import { createNotification } from './notification.routes';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -159,6 +160,17 @@ router.post('/deposit', authenticate, paymentLimiter, upload.single('receipt'), 
       console.error('Deposit submitted email failed (non-critical):', emailError?.message || emailError);
     });
 
+    // Create notification for deposit submission
+    createNotification(
+      userId,
+      'Deposit Request Submitted',
+      `Your deposit of रु ${parsedAmount.toFixed(2)} is being verified. Reference: ${transaction.reference}`,
+      'WALLET',
+      '/dashboard/wallet'
+    ).catch((notifError) => {
+      console.error('Deposit notification failed (non-critical):', notifError);
+    });
+
     res.status(201).json({
       message: 'Deposit request submitted successfully',
       transaction,
@@ -215,6 +227,17 @@ router.post('/withdrawal', authenticate, paymentLimiter, async (req: AuthRequest
           description: `Withdrawal to ${String(method).slice(0, 20)} - ${String(accountNumber).slice(0, 60)}`,
         },
       });
+    });
+
+    // Create notification for withdrawal submission
+    createNotification(
+      userId,
+      'Withdrawal Request Submitted',
+      `Your withdrawal of रु ${parsedAmount.toFixed(2)} is being processed. Amount deducted from wallet.`,
+      'WALLET',
+      '/dashboard/wallet'
+    ).catch((notifError) => {
+      console.error('Withdrawal notification failed (non-critical):', notifError);
     });
 
     res.status(201).json({
@@ -285,7 +308,7 @@ router.patch('/:id/status', authenticate, async (req: AuthRequest, res: Response
       }
 
       const updatedTransaction = await tx.transaction.findUnique({ where: { id } });
-      return { updatedTransaction };
+      return { updatedTransaction, transaction };
     });
 
     if ('error' in result) {
@@ -296,6 +319,55 @@ router.patch('/:id/status', authenticate, async (req: AuthRequest, res: Response
         return res.status(409).json({ message: `Transaction already finalized as ${result.currentStatus}` });
       }
       return res.status(409).json({ message: 'Transaction status update conflict. Please retry.' });
+    }
+
+    const { updatedTransaction, transaction } = result;
+
+    // Create notifications based on transaction status and type
+    if (status === 'COMPLETED') {
+      if (transaction.type === 'DEPOSIT') {
+        createNotification(
+          transaction.userId,
+          'Deposit Approved ✓',
+          `Your deposit of रु ${transaction.amount.toFixed(2)} has been approved and added to your wallet!`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Deposit approved notification failed (non-critical):', notifError);
+        });
+      } else if (transaction.type === 'WITHDRAWAL') {
+        createNotification(
+          transaction.userId,
+          'Withdrawal Completed ✓',
+          `Your withdrawal of रु ${transaction.amount.toFixed(2)} has been processed successfully.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Withdrawal completed notification failed (non-critical):', notifError);
+        });
+      }
+    } else if (status === 'FAILED') {
+      if (transaction.type === 'DEPOSIT') {
+        createNotification(
+          transaction.userId,
+          'Deposit Rejected',
+          `Your deposit of रु ${transaction.amount.toFixed(2)} was rejected. Please verify your payment details.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Deposit rejected notification failed (non-critical):', notifError);
+        });
+      } else if (transaction.type === 'WITHDRAWAL') {
+        createNotification(
+          transaction.userId,
+          'Withdrawal Failed - Refunded',
+          `Your withdrawal of रु ${transaction.amount.toFixed(2)} failed. Amount refunded to your wallet.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Withdrawal failed notification failed (non-critical):', notifError);
+        });
+      }
     }
 
     res.json({

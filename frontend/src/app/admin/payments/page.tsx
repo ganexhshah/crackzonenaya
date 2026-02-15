@@ -22,6 +22,9 @@ import {
   CreditCard,
   Upload,
   Image as ImageIcon,
+  FileText,
+  MessageSquare,
+  Clock,
 } from "lucide-react";
 import {
   Select,
@@ -40,23 +43,44 @@ import {
 } from "@/components/ui/dialog";
 import { adminService, AdminTransaction } from "@/services/admin.service";
 import { paymentMethodService, PaymentMethod } from "@/services/payment-method.service";
+import { transactionReportService, TransactionReport } from "@/services/transaction-report.service";
 import { toast } from "sonner";
 
 export default function AdminPaymentsPage() {
   const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [reports, setReports] = useState<TransactionReport[]>([]);
+  const [reportStats, setReportStats] = useState({ total: 0, pending: 0, underReview: 0, resolved: 0, rejected: 0 });
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
+  const [reportFilterStatus, setReportFilterStatus] = useState("all");
   
   const [actionDialog, setActionDialog] = useState<{
     open: boolean;
     action: string;
     transaction: AdminTransaction | null;
   }>({ open: false, action: "", transaction: null });
+
+  const [transactionDetailsDialog, setTransactionDetailsDialog] = useState<{
+    open: boolean;
+    transaction: AdminTransaction | null;
+    userTransactions: AdminTransaction[];
+    loading: boolean;
+  }>({ open: false, transaction: null, userTransactions: [], loading: false });
+
+  const [reportDialog, setReportDialog] = useState<{
+    open: boolean;
+    report: TransactionReport | null;
+  }>({ open: false, report: null });
+
+  const [reportForm, setReportForm] = useState({
+    status: "",
+    adminRemark: "",
+  });
 
   const [methodDialog, setMethodDialog] = useState<{
     open: boolean;
@@ -79,6 +103,7 @@ export default function AdminPaymentsPage() {
   useEffect(() => {
     loadTransactions();
     loadPaymentMethods();
+    loadReports();
   }, []);
 
   const loadTransactions = async () => {
@@ -105,6 +130,43 @@ export default function AdminPaymentsPage() {
     }
   };
 
+  const loadReports = async () => {
+    try {
+      const [reportsData, statsData] = await Promise.all([
+        transactionReportService.adminGetAllReports(),
+        transactionReportService.adminGetReportStats(),
+      ]);
+      setReports(reportsData);
+      setReportStats(statsData);
+    } catch (err: any) {
+      console.error('Failed to load reports:', err);
+      toast.error('Failed to load reports');
+    }
+  };
+
+  const handleReportUpdate = async () => {
+    if (!reportDialog.report || !reportForm.status) {
+      toast.error("Please select a status");
+      return;
+    }
+
+    try {
+      setUpdating(true);
+      await transactionReportService.adminUpdateReport(reportDialog.report.id, {
+        status: reportForm.status as any,
+        adminRemark: reportForm.adminRemark || undefined,
+      });
+      toast.success("Report updated successfully");
+      await loadReports();
+      setReportDialog({ open: false, report: null });
+      setReportForm({ status: "", adminRemark: "" });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update report");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const handleStatusUpdate = async (transactionId: string, status: string) => {
     try {
       setUpdating(true);
@@ -116,6 +178,35 @@ export default function AdminPaymentsPage() {
       toast.error(err.message || "Failed to update transaction");
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleViewTransactionDetails = async (transaction: AdminTransaction) => {
+    setTransactionDetailsDialog({
+      open: true,
+      transaction,
+      userTransactions: [],
+      loading: true,
+    });
+
+    try {
+      // Get all transactions for this user
+      const allTransactions = await adminService.getAllTransactions();
+      const userTransactions = allTransactions.filter(
+        (t) => t.userId === transaction.userId
+      );
+      
+      setTransactionDetailsDialog((prev) => ({
+        ...prev,
+        userTransactions,
+        loading: false,
+      }));
+    } catch (err: any) {
+      toast.error("Failed to load user transactions");
+      setTransactionDetailsDialog((prev) => ({
+        ...prev,
+        loading: false,
+      }));
     }
   };
 
@@ -302,6 +393,14 @@ export default function AdminPaymentsPage() {
       <Tabs defaultValue="transactions" className="space-y-6">
         <TabsList>
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
+          <TabsTrigger value="reports">
+            Reports
+            {reportStats.pending > 0 && (
+              <Badge variant="destructive" className="ml-2">
+                {reportStats.pending}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="methods">Payment Methods</TabsTrigger>
         </TabsList>
 
@@ -386,44 +485,72 @@ export default function AdminPaymentsPage() {
                 <Card key={txn.id}>
                   <CardContent className="p-6">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge className={getTypeColor(txn.type)}>{txn.type}</Badge>
-                          <Badge className={getStatusColor(txn.status)}>{txn.status}</Badge>
+                      <div className="flex gap-4 flex-1">
+                        {/* User Avatar */}
+                        <div className="flex-shrink-0">
+                          {txn.user.avatar ? (
+                            <img
+                              src={txn.user.avatar}
+                              alt={txn.user.username}
+                              className="w-12 h-12 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-lg font-bold border-2 border-gray-200 dark:border-gray-700">
+                              {txn.user.username.charAt(0).toUpperCase()}
+                            </div>
+                          )}
                         </div>
-                        <h3 className="font-semibold">{txn.user.username}</h3>
-                        <p className="text-sm text-muted-foreground">{txn.user.email}</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Reference: {txn.reference}
-                        </p>
-                        {txn.description && (
-                          <p className="text-sm text-muted-foreground mt-1">{txn.description}</p>
-                        )}
-                        {txn.receiptUrl && (
-                          <div className="mt-2">
-                            <a
-                              href={txn.receiptUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm text-blue-600 hover:underline flex items-center gap-1"
-                            >
-                              <ImageIcon className="w-4 h-4" />
-                              View Receipt
-                            </a>
+                        
+                        {/* Transaction Info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <Badge className={getTypeColor(txn.type)}>{txn.type}</Badge>
+                            <Badge className={getStatusColor(txn.status)}>{txn.status}</Badge>
                           </div>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-2">
-                          {new Date(txn.createdAt).toLocaleString()}
-                        </p>
+                          <h3 className="font-semibold">{txn.user.username}</h3>
+                          <p className="text-sm text-muted-foreground truncate">{txn.user.email}</p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Reference: {txn.reference}
+                          </p>
+                          {txn.description && (
+                            <p className="text-sm text-muted-foreground mt-1">{txn.description}</p>
+                          )}
+                          {txn.receiptUrl && (
+                            <div className="mt-2">
+                              <a
+                                href={txn.receiptUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                              >
+                                <ImageIcon className="w-4 h-4" />
+                                View Receipt
+                              </a>
+                            </div>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-2">
+                            {new Date(txn.createdAt).toLocaleString()}
+                          </p>
+                        </div>
                       </div>
 
                       <div className="flex flex-col items-end gap-2">
                         <div className="text-2xl font-bold">रु {txn.amount}</div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewTransactionDetails(txn)}
+                          className="w-full"
+                        >
+                          <FileText className="w-4 h-4 mr-2" />
+                          View Details
+                        </Button>
                         {txn.status === "PENDING" && (
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 w-full">
                             <Button
                               size="sm"
                               variant="default"
+                              className="flex-1"
                               onClick={() =>
                                 setActionDialog({ open: true, action: "approve", transaction: txn })
                               }
@@ -434,6 +561,7 @@ export default function AdminPaymentsPage() {
                             <Button
                               size="sm"
                               variant="destructive"
+                              className="flex-1"
                               onClick={() =>
                                 setActionDialog({ open: true, action: "reject", transaction: txn })
                               }
@@ -452,6 +580,155 @@ export default function AdminPaymentsPage() {
               <Card>
                 <CardContent className="p-12 text-center">
                   <p className="text-muted-foreground">No transactions found</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Reports Tab */}
+        <TabsContent value="reports" className="space-y-6">
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Total Reports</div>
+                <div className="text-2xl font-bold mt-1">{reportStats.total}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Pending</div>
+                <div className="text-2xl font-bold mt-1 text-orange-600">{reportStats.pending}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Under Review</div>
+                <div className="text-2xl font-bold mt-1 text-blue-600">{reportStats.underReview}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Resolved</div>
+                <div className="text-2xl font-bold mt-1 text-green-600">{reportStats.resolved}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="text-sm text-muted-foreground">Rejected</div>
+                <div className="text-2xl font-bold mt-1 text-red-600">{reportStats.rejected}</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Filter */}
+          <Card>
+            <CardContent className="p-4">
+              <Select value={reportFilterStatus} onValueChange={setReportFilterStatus}>
+                <SelectTrigger className="w-full md:w-48">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="PENDING">Pending</SelectItem>
+                  <SelectItem value="UNDER_REVIEW">Under Review</SelectItem>
+                  <SelectItem value="RESOLVED">Resolved</SelectItem>
+                  <SelectItem value="REJECTED">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {/* Reports List */}
+          <div className="space-y-4">
+            {reports
+              .filter((r) => reportFilterStatus === "all" || r.status === reportFilterStatus)
+              .map((report) => (
+                <Card key={report.id}>
+                  <CardContent className="p-6">
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge
+                              variant={
+                                report.status === 'RESOLVED'
+                                  ? 'default'
+                                  : report.status === 'REJECTED'
+                                  ? 'destructive'
+                                  : report.status === 'UNDER_REVIEW'
+                                  ? 'secondary'
+                                  : 'outline'
+                              }
+                            >
+                              {report.status.replace('_', ' ')}
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">
+                              {new Date(report.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+
+                          <div>
+                            <p className="font-semibold capitalize">
+                              {report.issueType.replace(/_/g, ' ')}
+                            </p>
+                            {report.transaction?.user && (
+                              <p className="text-sm text-muted-foreground">
+                                User: {report.transaction.user.username} ({report.transaction.user.email})
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="bg-muted/50 p-3 rounded-lg">
+                            <p className="text-sm font-medium mb-1">Description:</p>
+                            <p className="text-sm text-muted-foreground">{report.description}</p>
+                          </div>
+
+                          {report.transaction && (
+                            <div className="flex flex-wrap items-center gap-4 text-sm">
+                              <span>Amount: रु {Math.abs(report.transaction.amount)}</span>
+                              <span>•</span>
+                              <span>Ref: {report.transaction.reference}</span>
+                              <span>•</span>
+                              <Badge variant="outline">{report.transaction.status}</Badge>
+                            </div>
+                          )}
+
+                          {report.adminRemark && (
+                            <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <p className="text-sm font-medium mb-1 text-blue-900 dark:text-blue-100">
+                                Admin Response:
+                              </p>
+                              <p className="text-sm text-blue-900 dark:text-blue-100">{report.adminRemark}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setReportDialog({ open: true, report });
+                            setReportForm({
+                              status: report.status,
+                              adminRemark: report.adminRemark || "",
+                            });
+                          }}
+                        >
+                          <MessageSquare className="w-4 h-4 mr-2" />
+                          Respond
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+
+            {reports.filter((r) => reportFilterStatus === "all" || r.status === reportFilterStatus).length === 0 && (
+              <Card>
+                <CardContent className="p-12 text-center">
+                  <FileText className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <p className="text-muted-foreground">No reports found</p>
                 </CardContent>
               </Card>
             )}
@@ -739,6 +1016,299 @@ export default function AdminPaymentsPage() {
             </Button>
             <Button onClick={handleSaveMethod} disabled={!methodForm.name || saving}>
               {saving ? "Saving..." : methodDialog.mode === "add" ? "Add Method" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Response Dialog */}
+      <Dialog
+        open={reportDialog.open}
+        onOpenChange={(open) => !open && setReportDialog({ open: false, report: null })}
+      >
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Respond to Report</DialogTitle>
+            <DialogDescription>
+              Update the status and provide feedback to the user
+            </DialogDescription>
+          </DialogHeader>
+
+          {reportDialog.report && (
+            <div className="space-y-4">
+              {/* Report Details */}
+              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+                <div>
+                  <p className="text-sm font-medium">Issue Type</p>
+                  <p className="text-sm capitalize">{reportDialog.report.issueType.replace(/_/g, ' ')}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-medium">User Description</p>
+                  <p className="text-sm text-muted-foreground">{reportDialog.report.description}</p>
+                </div>
+                {reportDialog.report.transaction && (
+                  <div className="flex gap-4 text-sm">
+                    <span>Amount: रु {Math.abs(reportDialog.report.transaction.amount)}</span>
+                    <span>Ref: {reportDialog.report.transaction.reference}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Status Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={reportForm.status}
+                  onValueChange={(value) => setReportForm({ ...reportForm, status: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="UNDER_REVIEW">Under Review</SelectItem>
+                    <SelectItem value="RESOLVED">Resolved</SelectItem>
+                    <SelectItem value="REJECTED">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Admin Remark */}
+              <div className="space-y-2">
+                <Label htmlFor="adminRemark">Admin Response</Label>
+                <Textarea
+                  id="adminRemark"
+                  placeholder="Provide feedback or explanation to the user..."
+                  value={reportForm.adminRemark}
+                  onChange={(e) => setReportForm({ ...reportForm, adminRemark: e.target.value })}
+                  rows={5}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This message will be sent to the user via email
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReportDialog({ open: false, report: null })}
+              disabled={updating}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleReportUpdate} disabled={updating || !reportForm.status}>
+              {updating ? "Updating..." : "Update Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transaction Details Dialog */}
+      <Dialog
+        open={transactionDetailsDialog.open}
+        onOpenChange={(open) => !open && setTransactionDetailsDialog({ open: false, transaction: null, userTransactions: [], loading: false })}
+      >
+        <DialogContent className="max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>Transaction Details</DialogTitle>
+            <DialogDescription>
+              Complete user profile and transaction history
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto pr-2">
+            {transactionDetailsDialog.transaction && (
+              <div className="space-y-6 pb-4">
+                {/* Current Transaction */}
+                <div className="bg-muted/50 p-4 rounded-lg space-y-3">
+                  <h3 className="font-semibold text-lg">Current Transaction</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Type</p>
+                      <Badge className={getTypeColor(transactionDetailsDialog.transaction.type)}>
+                        {transactionDetailsDialog.transaction.type}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Status</p>
+                      <Badge className={getStatusColor(transactionDetailsDialog.transaction.status)}>
+                        {transactionDetailsDialog.transaction.status}
+                      </Badge>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Amount</p>
+                      <p className="font-semibold text-lg">रु {transactionDetailsDialog.transaction.amount}</p>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-1">
+                      <p className="text-sm text-muted-foreground">Reference</p>
+                      <p className="font-medium text-sm break-all">{transactionDetailsDialog.transaction.reference}</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="text-sm text-muted-foreground">Description</p>
+                      <p className="text-sm">{transactionDetailsDialog.transaction.description}</p>
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-1">
+                      <p className="text-sm text-muted-foreground">Date</p>
+                      <p className="text-sm">{new Date(transactionDetailsDialog.transaction.createdAt).toLocaleString()}</p>
+                    </div>
+                    {transactionDetailsDialog.transaction.receiptUrl && (
+                      <div className="sm:col-span-2 lg:col-span-3">
+                        <p className="text-sm text-muted-foreground mb-2">Receipt</p>
+                        <a
+                          href={transactionDetailsDialog.transaction.receiptUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block"
+                        >
+                          <img
+                            src={transactionDetailsDialog.transaction.receiptUrl}
+                            alt="Receipt"
+                            className="max-w-full sm:max-w-xs border rounded hover:opacity-80 transition-opacity"
+                          />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* User Profile */}
+                <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg space-y-3">
+                  <h3 className="font-semibold text-lg">User Profile</h3>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    {/* Avatar */}
+                    <div className="flex justify-center sm:justify-start flex-shrink-0">
+                      {transactionDetailsDialog.transaction.user.avatar ? (
+                        <img
+                          src={transactionDetailsDialog.transaction.user.avatar}
+                          alt={transactionDetailsDialog.transaction.user.username}
+                          className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border-4 border-white dark:border-gray-800 shadow-lg"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl sm:text-3xl font-bold border-4 border-white dark:border-gray-800 shadow-lg">
+                          {transactionDetailsDialog.transaction.user.username.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* User Info */}
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Username</p>
+                        <p className="font-medium break-words">{transactionDetailsDialog.transaction.user.username}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Email</p>
+                        <p className="font-medium break-all text-sm">{transactionDetailsDialog.transaction.user.email}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">User ID</p>
+                        <p className="text-xs font-mono break-all">{transactionDetailsDialog.transaction.user.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">Current Balance</p>
+                        <p className="font-semibold text-lg sm:text-xl text-green-600 dark:text-green-400">
+                          रु {transactionDetailsDialog.transaction.user.balance?.toFixed(2) || '0.00'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* User Activity Stats */}
+                <div className="bg-purple-50 dark:bg-purple-950 p-4 rounded-lg space-y-3">
+                  <h3 className="font-semibold text-lg">User Activity</h3>
+                  {transactionDetailsDialog.loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Clock className="w-6 h-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                      <div>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Total Transactions</p>
+                        <p className="text-xl sm:text-2xl font-bold">{transactionDetailsDialog.userTransactions.length}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Total Deposits</p>
+                        <p className="text-xl sm:text-2xl font-bold text-green-600">
+                          {transactionDetailsDialog.userTransactions.filter((t) => t.type === "DEPOSIT").length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Total Withdrawals</p>
+                        <p className="text-xl sm:text-2xl font-bold text-purple-600">
+                          {transactionDetailsDialog.userTransactions.filter((t) => t.type === "WITHDRAWAL").length}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
+                        <p className="text-xl sm:text-2xl font-bold text-yellow-600">
+                          {transactionDetailsDialog.userTransactions.filter((t) => t.status === "PENDING").length}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* All User Transactions */}
+                <div className="space-y-3">
+                  <h3 className="font-semibold text-lg">All User Transactions</h3>
+                  {transactionDetailsDialog.loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Clock className="w-6 h-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : transactionDetailsDialog.userTransactions.length > 0 ? (
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
+                      {transactionDetailsDialog.userTransactions.map((txn) => (
+                        <button
+                          key={txn.id}
+                          onClick={() => handleViewTransactionDetails(txn)}
+                          className={`w-full p-3 rounded-lg border text-left transition-all hover:shadow-md ${
+                            txn.id === transactionDetailsDialog.transaction?.id
+                              ? "bg-blue-50 dark:bg-blue-950 border-blue-300 dark:border-blue-700 ring-2 ring-blue-400"
+                              : "bg-muted/30 hover:bg-muted/50 border-transparent"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 sm:gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <Badge className={getTypeColor(txn.type)} variant="outline">
+                                  {txn.type}
+                                </Badge>
+                                <Badge className={getStatusColor(txn.status)} variant="outline">
+                                  {txn.status}
+                                </Badge>
+                                {txn.id === transactionDetailsDialog.transaction?.id && (
+                                  <Badge variant="default" className="text-xs">Current</Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground truncate">{txn.reference}</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {new Date(txn.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="font-semibold text-base sm:text-lg">रु {txn.amount}</p>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center text-muted-foreground py-8">No transactions found</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-shrink-0 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setTransactionDetailsDialog({ open: false, transaction: null, userTransactions: [], loading: false })}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { sendEmail } from '../config/email';
+import { createNotification } from './notification.routes';
 
 const router = Router();
 
@@ -243,6 +244,7 @@ router.get('/transactions', async (req, res) => {
             username: true,
             email: true,
             avatar: true,
+            balance: true,
           },
         },
       },
@@ -252,6 +254,273 @@ router.get('/transactions', async (req, res) => {
     res.json(transactions);
   } catch (error) {
     console.error('Get all transactions error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all teams with stats
+router.get('/teams', async (req, res) => {
+  try {
+    const teams = await prisma.team.findMany({
+      include: {
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            avatar: true,
+          },
+        },
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            members: true,
+            matches: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(teams);
+  } catch (error) {
+    console.error('Get all teams error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get team stats
+router.get('/teams/stats', async (req, res) => {
+  try {
+    const [total, active, inactive] = await Promise.all([
+      prisma.team.count(),
+      prisma.team.count({ where: { isActive: true } }),
+      prisma.team.count({ where: { isActive: false } }),
+    ]);
+
+    res.json({
+      total,
+      active,
+      inactive,
+    });
+  } catch (error) {
+    console.error('Get team stats error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update team status
+router.patch('/teams/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    const team = await prisma.team.update({
+      where: { id },
+      data: { isActive },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+          },
+        },
+        members: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    res.json(team);
+  } catch (error) {
+    console.error('Update team status error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Delete team
+router.delete('/teams/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await prisma.team.delete({
+      where: { id },
+    });
+
+    res.json({ message: 'Team deleted successfully' });
+  } catch (error) {
+    console.error('Delete team error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get transaction report stats (must be before /transaction-reports to avoid treating 'stats' as ID)
+router.get('/transaction-reports/stats', async (req, res) => {
+  try {
+    const [total, pending, underReview, resolved, rejected] = await Promise.all([
+      prisma.transactionReport.count(),
+      prisma.transactionReport.count({ where: { status: 'PENDING' } }),
+      prisma.transactionReport.count({ where: { status: 'UNDER_REVIEW' } }),
+      prisma.transactionReport.count({ where: { status: 'RESOLVED' } }),
+      prisma.transactionReport.count({ where: { status: 'REJECTED' } }),
+    ]);
+
+    res.json({
+      total,
+      pending,
+      underReview,
+      resolved,
+      rejected,
+    });
+  } catch (error) {
+    console.error('Get report stats error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get all transaction reports
+router.get('/transaction-reports', async (req, res) => {
+  try {
+    const reports = await prisma.transactionReport.findMany({
+      include: {
+        transaction: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                email: true,
+                avatar: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(reports);
+  } catch (error) {
+    console.error('Get transaction reports error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Update transaction report status
+// Update transaction report status
+router.patch('/transaction-reports/:id', async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminRemark } = req.body;
+
+    const report = await prisma.transactionReport.update({
+      where: { id },
+      data: {
+        status,
+        adminRemark,
+        resolvedBy: req.user.id,
+        resolvedAt: status === 'RESOLVED' || status === 'REJECTED' ? new Date() : null,
+      },
+      include: {
+        transaction: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Send email notification to user about status update
+    if (report.transaction.user && (status === 'RESOLVED' || status === 'REJECTED' || status === 'UNDER_REVIEW')) {
+      const statusText = status === 'RESOLVED' ? 'Resolved' : status === 'REJECTED' ? 'Rejected' : 'Under Review';
+      const statusColor = status === 'RESOLVED' ? '#065f46' : status === 'REJECTED' ? '#7f1d1d' : '#1e40af';
+      const issueTypeFormatted = report.issueType.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+
+      sendEmail(
+        report.transaction.user.email,
+        `Transaction Issue Report ${statusText}`,
+        `
+          <div style="margin:0;padding:24px;background:#f3f4f6;font-family:Arial,sans-serif;color:#111827;">
+            <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+              <div style="background:${statusColor};padding:16px 20px;">
+                <h2 style="margin:0;font-size:18px;color:#ffffff;">
+                  Report Status: ${statusText}
+                </h2>
+              </div>
+              <div style="padding:20px;">
+                <p style="margin:0 0 12px;color:#4b5563;">
+                  Hi ${report.transaction.user.username},
+                </p>
+                <p style="margin:0 0 12px;color:#4b5563;">
+                  Your transaction issue report has been updated.
+                </p>
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:16px 0;">
+                  <p style="margin:0 0 8px;"><strong>Status:</strong> ${statusText}</p>
+                  <p style="margin:0 0 8px;"><strong>Issue Type:</strong> ${issueTypeFormatted}</p>
+                  <p style="margin:0 0 8px;"><strong>Transaction ID:</strong> ${report.transaction.reference || report.transaction.id}</p>
+                  <p style="margin:0;"><strong>Amount:</strong> रु ${Math.abs(report.transaction.amount)}</p>
+                </div>
+                ${adminRemark ? `
+                  <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:10px;padding:14px 16px;margin:16px 0;">
+                    <p style="margin:0 0 8px;font-weight:600;color:#92400e;">Admin Response:</p>
+                    <p style="margin:0;color:#92400e;">${adminRemark}</p>
+                  </div>
+                ` : ''}
+                <p style="margin:16px 0 0;color:#111827;">
+                  ${status === 'RESOLVED' 
+                    ? 'Your issue has been resolved. If you have any further questions, please contact support.' 
+                    : status === 'REJECTED'
+                    ? 'Your report has been reviewed. Please check the admin response above for details.'
+                    : 'Our team is currently reviewing your issue. We\'ll update you once we have more information.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        `
+      ).catch((emailError) => {
+        console.error('Report status update email failed (non-critical):', emailError?.message || emailError);
+      });
+
+      // Create notification for report status update
+      const statusEmoji = status === 'RESOLVED' ? '✓' : status === 'REJECTED' ? '✗' : '🔍';
+      const notifMessage = status === 'RESOLVED' 
+        ? `Your transaction issue report has been resolved. ${adminRemark ? 'Check admin response.' : ''}`
+        : status === 'REJECTED'
+        ? `Your transaction issue report was rejected. ${adminRemark ? 'Check admin response.' : ''}`
+        : 'Your transaction issue report is under review by our team.';
+
+      createNotification(
+        report.transaction.userId,
+        `Report ${statusText} ${statusEmoji}`,
+        notifMessage,
+        'WALLET',
+        '/dashboard/reports'
+      ).catch((notifError) => {
+        console.error('Report status notification failed (non-critical):', notifError);
+      });
+    }
+
+    res.json(report);
+  } catch (error) {
+    console.error('Update report error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -373,6 +642,58 @@ router.patch('/transactions/:id/status', async (req, res) => {
       ).catch((emailError) => {
         console.error('Transaction decision email failed (non-critical):', emailError?.message || emailError);
       });
+
+      // Create notification for deposit decision
+      if (status === 'COMPLETED') {
+        createNotification(
+          transaction.userId,
+          'Deposit Approved ✓',
+          `Your deposit of रु ${transaction.amount.toFixed(2)} has been approved and added to your wallet!`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Deposit approved notification failed (non-critical):', notifError);
+        });
+      } else {
+        createNotification(
+          transaction.userId,
+          'Deposit Rejected',
+          `Your deposit of रु ${transaction.amount.toFixed(2)} was rejected. Please verify your payment details.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Deposit rejected notification failed (non-critical):', notifError);
+        });
+      }
+    }
+
+    // Create notification for withdrawal decision
+    if (
+      transaction.type === 'WITHDRAWAL' &&
+      transaction.status !== status &&
+      (status === 'COMPLETED' || status === 'FAILED')
+    ) {
+      if (status === 'COMPLETED') {
+        createNotification(
+          transaction.userId,
+          'Withdrawal Completed ✓',
+          `Your withdrawal of रु ${transaction.amount.toFixed(2)} has been processed successfully.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Withdrawal completed notification failed (non-critical):', notifError);
+        });
+      } else {
+        createNotification(
+          transaction.userId,
+          'Withdrawal Failed - Refunded',
+          `Your withdrawal of रु ${transaction.amount.toFixed(2)} failed. Amount refunded to your wallet.`,
+          'WALLET',
+          '/dashboard/wallet'
+        ).catch((notifError) => {
+          console.error('Withdrawal failed notification failed (non-critical):', notifError);
+        });
+      }
     }
 
     res.json(updatedTransaction);

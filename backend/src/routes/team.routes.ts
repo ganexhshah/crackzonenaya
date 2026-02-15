@@ -449,10 +449,18 @@ router.get('/:id/join-requests', authenticate, async (req: any, res) => {
     const requests = await prisma.teamJoinRequest.findMany({
       where: {
         teamId: req.params.id,
-        status: 'PENDING',
       },
       include: {
-        user: { select: { id: true, username: true, avatar: true, gameName: true, gameId: true } },
+        user: { 
+          select: { 
+            id: true, 
+            username: true, 
+            email: true,
+            avatar: true, 
+            gameName: true, 
+            gameId: true 
+          } 
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -463,10 +471,65 @@ router.get('/:id/join-requests', authenticate, async (req: any, res) => {
   }
 });
 
-// Approve/reject join request
+// Approve/reject join request (PUT method with action in body)
 router.put('/:id/join-requests/:requestId', authenticate, async (req: any, res) => {
   try {
     const { action } = req.body; // 'approve' or 'reject'
+
+    const team = await prisma.team.findUnique({ where: { id: req.params.id } });
+    if (!team) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+
+    if (team.ownerId !== req.user.id) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    const joinRequest = await prisma.teamJoinRequest.findUnique({
+      where: { id: req.params.requestId },
+    });
+
+    if (!joinRequest) {
+      return res.status(404).json({ error: 'Join request not found' });
+    }
+
+    if (action === 'approve') {
+      // Add user to team
+      await prisma.teamMember.create({
+        data: {
+          teamId: req.params.id,
+          userId: joinRequest.userId,
+          role: 'MEMBER',
+        },
+      });
+
+      // Update request status
+      await prisma.teamJoinRequest.update({
+        where: { id: req.params.requestId },
+        data: { status: 'APPROVED' },
+      });
+
+      res.json({ message: 'Join request approved' });
+    } else if (action === 'reject') {
+      await prisma.teamJoinRequest.update({
+        where: { id: req.params.requestId },
+        data: { status: 'REJECTED' },
+      });
+
+      res.json({ message: 'Join request rejected' });
+    } else {
+      res.status(400).json({ error: 'Invalid action' });
+    }
+  } catch (error) {
+    console.error('Join request action error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Approve/reject join request (POST method with action in URL - for frontend compatibility)
+router.post('/:id/join-requests/:requestId/:action', authenticate, async (req: any, res) => {
+  try {
+    const { action } = req.params; // 'approve' or 'reject'
 
     const team = await prisma.team.findUnique({ where: { id: req.params.id } });
     if (!team) {

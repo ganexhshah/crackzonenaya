@@ -359,9 +359,37 @@ model Transaction {
   receiptUrl    String?
   createdAt     DateTime  @default(now())
   
+  reports       TransactionReport[]
+  
   @@index([userId])
   @@index([status])
   @@unique([type, reference])
+}
+
+model TransactionReport {
+  id            String    @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  userId        String
+  issueType     String
+  description   String
+  status        ReportIssueStatus @default(PENDING)
+  adminRemark   String?
+  resolvedBy    String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  resolvedAt    DateTime?
+  
+  @@index([transactionId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum ReportIssueStatus {
+  PENDING
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
 }
 
 enum TransactionType {

@@ -16,6 +16,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Wallet,
   Plus,
@@ -29,16 +37,20 @@ import {
   XCircle,
   DollarSign,
   AlertCircle,
+  FileText,
 } from "lucide-react";
 import { walletService, WalletData, Transaction } from "@/services/wallet.service";
 import { paymentMethodService, PaymentMethod } from "@/services/payment-method.service";
+import { transactionReportService, TransactionReport } from "@/services/transaction-report.service";
 import { toast } from "sonner";
 import { getCachedPageData, setCachedPageData } from "@/lib/page-cache";
+import { useRouter } from "next/navigation";
 
 const WALLET_CACHE_KEY = "dashboard:wallet";
 const WALLET_CACHE_TTL_MS = 2 * 60 * 1000;
 
 export default function WalletPage() {
+  const router = useRouter();
   const [walletData, setWalletData] = useState<WalletData>({
     balance: 0,
     currency: "रु",
@@ -48,6 +60,8 @@ export default function WalletPage() {
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [isAddMoneyOpen, setIsAddMoneyOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
+  const [isReportIssueOpen, setIsReportIssueOpen] = useState(false);
+  const [reportTransaction, setReportTransaction] = useState<Transaction | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
   useEffect(() => {
@@ -100,11 +114,21 @@ export default function WalletPage() {
   return (
     <div className="p-4 md:p-6 lg:p-8 space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold">Wallet</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your funds and transactions
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold">Wallet</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage your funds and transactions
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push('/dashboard/reports')}
+        >
+          <FileText className="w-4 h-4 mr-2" />
+          Report History
+        </Button>
       </div>
 
       {/* Balance Card */}
@@ -346,7 +370,9 @@ export default function WalletPage() {
                   variant="outline"
                   className="w-full h-10 sm:h-11 text-sm sm:text-base"
                   onClick={() => {
-                    toast.info("Report feature coming soon. Please contact support for urgent issues.");
+                    setReportTransaction(selectedReceipt);
+                    setIsReportIssueOpen(true);
+                    setSelectedReceipt(null);
                   }}
                 >
                   <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -355,6 +381,19 @@ export default function WalletPage() {
               </div>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Issue Dialog */}
+      <Dialog open={isReportIssueOpen} onOpenChange={setIsReportIssueOpen}>
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
+          <ReportIssueDialog
+            transaction={reportTransaction}
+            onClose={() => {
+              setIsReportIssueOpen(false);
+              setReportTransaction(null);
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>
@@ -577,11 +616,37 @@ function AddMoneyDialog({ onClose }: { onClose: () => void }) {
                 src={selectedMethod.qrCodeUrl}
                 alt={`${selectedMethod.name} QR Code`}
                 className="w-48 h-48 sm:w-64 sm:h-64 mx-auto object-contain rounded-lg"
+                id="payment-qr-code"
               />
               <p className="text-xs sm:text-sm font-medium mt-3 sm:mt-4">Scan to pay रु {amount}</p>
               <p className="text-xs text-muted-foreground mt-1">
                 Use your {selectedMethod.name} app to scan and pay
               </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(selectedMethod.qrCodeUrl!);
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `${selectedMethod.name}-QR-Code.png`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                    toast.success('QR code downloaded');
+                  } catch (error) {
+                    toast.error('Failed to download QR code');
+                  }
+                }}
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Download QR Code
+              </Button>
             </div>
           )}
 
@@ -847,6 +912,130 @@ function WithdrawDialog({ onClose, walletBalance }: { onClose: () => void; walle
         <Button className="w-full h-11 sm:h-12 text-sm sm:text-base" onClick={handleSubmit} disabled={submitting}>
           {submitting ? "Submitting..." : "Submit Withdrawal Request"}
         </Button>
+      </div>
+    </>
+  );
+}
+
+
+function ReportIssueDialog({ transaction, onClose }: { transaction: Transaction | null; onClose: () => void }) {
+  const [issueType, setIssueType] = useState("");
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!issueType || !description) {
+      toast.error("Please fill all fields");
+      return;
+    }
+
+    if (!transaction) {
+      toast.error("Transaction not found");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await transactionReportService.createReport({
+        transactionId: transaction.id,
+        issueType,
+        description,
+      });
+      toast.success("Issue reported successfully. Our team will review it shortly.");
+      onClose();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to submit report");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="text-base sm:text-lg md:text-xl">Report Transaction Issue</DialogTitle>
+        <DialogDescription className="text-xs sm:text-sm">
+          Transaction ID: {transaction?.reference || 'N/A'}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        {/* Transaction Details */}
+        <div className="bg-muted/50 p-3 sm:p-4 rounded-lg space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Amount</span>
+            <span className="font-medium">रु {Math.abs(transaction?.amount || 0)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Type</span>
+            <span className="font-medium capitalize">{transaction?.type}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Status</span>
+            <Badge variant="secondary" className="text-xs">
+              {transaction?.status}
+            </Badge>
+          </div>
+        </div>
+
+        {/* Issue Type */}
+        <div className="space-y-2">
+          <Label htmlFor="issueType" className="text-sm sm:text-base">Issue Type *</Label>
+          <Select value={issueType} onValueChange={setIssueType}>
+            <SelectTrigger className="h-10 sm:h-11">
+              <SelectValue placeholder="Select issue type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="payment_not_received">Payment Not Received</SelectItem>
+              <SelectItem value="wrong_amount">Wrong Amount Credited</SelectItem>
+              <SelectItem value="duplicate_charge">Duplicate Charge</SelectItem>
+              <SelectItem value="payment_failed">Payment Failed But Amount Deducted</SelectItem>
+              <SelectItem value="withdrawal_delayed">Withdrawal Delayed</SelectItem>
+              <SelectItem value="other">Other Issue</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Description */}
+        <div className="space-y-2">
+          <Label htmlFor="description" className="text-sm sm:text-base">Description *</Label>
+          <Textarea
+            id="description"
+            placeholder="Please describe your issue in detail..."
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={5}
+            className="text-sm sm:text-base resize-none"
+          />
+          <p className="text-xs text-muted-foreground">
+            Include any relevant details like transaction time, payment method, etc.
+          </p>
+        </div>
+
+        {/* Info Box */}
+        <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg">
+          <p className="text-xs sm:text-sm text-blue-900 dark:text-blue-100">
+            <strong>Note:</strong> Our support team will review your issue within 24 hours and contact you via email.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Button
+            variant="outline"
+            className="flex-1 h-10 sm:h-11 text-sm sm:text-base"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 h-10 sm:h-11 text-sm sm:text-base"
+            onClick={handleSubmit}
+            disabled={submitting || !issueType || !description}
+          >
+            {submitting ? "Submitting..." : "Submit Report"}
+          </Button>
+        </div>
       </div>
     </>
   );

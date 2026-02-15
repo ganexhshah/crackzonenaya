@@ -64,6 +64,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  XCircle,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -107,6 +108,9 @@ export default function TeamDetailPage() {
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
+  const [showRequestsDialog, setShowRequestsDialog] = useState(false);
 
   // New states for user list
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -167,6 +171,12 @@ export default function TeamDetailPage() {
     }
   }, [isAddMemberOpen, team, user]);
 
+  useEffect(() => {
+    if (team && team.ownerId === user?.id) {
+      fetchJoinRequests();
+    }
+  }, [team, user]);
+
   const fetchAllUsers = async () => {
     setIsLoadingUsers(true);
     try {
@@ -194,6 +204,30 @@ export default function TeamDetailPage() {
       setInvitedUsers(invited);
     } catch (error: any) {
       console.error('Failed to fetch invitations:', error);
+    }
+  };
+
+  const fetchJoinRequests = async () => {
+    setIsLoadingRequests(true);
+    try {
+      const requests = await api.get(`/teams/${teamId}/join-requests`) as any[];
+      setJoinRequests(requests);
+    } catch (error: any) {
+      console.error('Failed to fetch join requests:', error);
+    } finally {
+      setIsLoadingRequests(false);
+    }
+  };
+
+  const handleJoinRequestAction = async (requestId: string, action: 'approve' | 'reject') => {
+    try {
+      await api.post(`/teams/${teamId}/join-requests/${requestId}/${action}`);
+      toast.success(action === 'approve' ? 'Request approved!' : 'Request rejected');
+      fetchJoinRequests();
+      fetchTeam();
+    } catch (error: any) {
+      console.error('Failed to process join request:', error);
+      toast.error(error.response?.data?.error || 'Failed to process request');
     }
   };
 
@@ -331,7 +365,16 @@ export default function TeamDetailPage() {
       fetchInvitations();
     } catch (error: any) {
       console.error('Failed to invite user:', error);
-      toast.error(error.response?.data?.error || 'Failed to send invitation');
+      const errorMessage = error.response?.data?.error || error.message;
+      
+      // Handle specific error cases
+      if (errorMessage.includes('already sent') || errorMessage.includes('already a team member')) {
+        toast.info(errorMessage);
+        // Mark as invited in UI even if backend says already invited
+        setInvitedUsers(prev => new Set([...prev, userId]));
+      } else {
+        toast.error(errorMessage || 'Failed to send invitation');
+      }
     }
   };
 
@@ -546,86 +589,72 @@ export default function TeamDetailPage() {
           
           {isOwner && (
             <>
-              <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
-                  <Share2 className="mr-2 h-4 w-4" />
-                  <span className="hidden sm:inline">Invite</span>
-                  <span className="sm:hidden">Invite</span>
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Invite Players</DialogTitle>
-                  <DialogDescription>
-                    Share this code with players to join your team
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <Label>Invite Code</Label>
-                    <div className="flex gap-2">
-                      <Input value={`TEAM-${teamId}`} readOnly />
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={copyInviteCode}
-                      >
-                        {copied ? (
-                          <Check className="h-4 w-4 text-green-600" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Players can use this code to request joining your team
-                  </p>
-                </div>
-              </DialogContent>
-            </Dialog>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="flex-1 sm:flex-none relative"
+                onClick={() => {
+                  setShowRequestsDialog(true);
+                  fetchJoinRequests();
+                }}
+              >
+                <Users className="mr-2 h-4 w-4" />
+                <span className="hidden sm:inline">Requests</span>
+                <span className="sm:hidden">Requests</span>
+                {joinRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                  <Badge 
+                    variant="destructive" 
+                    className="absolute -top-2 -right-2 h-5 w-5 flex items-center justify-center p-0 text-xs"
+                  >
+                    {joinRequests.filter(r => r.status === 'PENDING').length}
+                  </Badge>
+                )}
+              </Button>
 
-            <TeamQRDialog teamId={teamId} teamName={team.name} />
+              <TeamQRDialog teamId={teamId} teamName={team.name} />
 
-            <Button asChild size="sm" className="flex-1 sm:flex-none">
-              <Link href={`/dashboard/teams/${teamId}/edit`}>
-                <Edit className="mr-2 h-4 w-4" />
-                <span className="hidden sm:inline">Edit Team</span>
-                <span className="sm:hidden">Edit</span>
-              </Link>
-            </Button>
+              <Button asChild size="sm" className="flex-1 sm:flex-none">
+                <Link href={`/dashboard/teams/${teamId}/edit`}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  <span className="hidden sm:inline">Edit Team</span>
+                  <span className="sm:hidden">Edit</span>
+                </Link>
+              </Button>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="px-2 sm:px-3">
-                  <Settings className="h-4 w-4" />
-                  <span className="sr-only">Settings</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>Team Settings</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href={`/dashboard/teams/${teamId}/edit`}>
-                    <Edit className="mr-2 h-4 w-4" />
-                    Edit Team Info
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setIsAddMemberOpen(true)}>
-                  <UserPlus className="mr-2 h-4 w-4" />
-                  Add Member
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Team
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="px-2 sm:px-3">
+                    <Settings className="h-4 w-4" />
+                    <span className="sr-only">Settings</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Team Settings</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href={`/dashboard/teams/${teamId}/edit`}>
+                      <Edit className="mr-2 h-4 w-4" />
+                      Edit Team Info
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsAddMemberOpen(true)}>
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    Add Member
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsInviteOpen(true)}>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Invite Code
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => setShowDeleteDialog(true)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Team
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           )}
         </div>
@@ -1323,6 +1352,127 @@ export default function TeamDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Join Requests Section */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base sm:text-lg flex items-center gap-2">
+                      Join Requests
+                      {joinRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                        <Badge variant="destructive" className="text-xs">
+                          {joinRequests.filter(r => r.status === 'PENDING').length}
+                        </Badge>
+                      )}
+                    </CardTitle>
+                    <CardDescription className="text-xs sm:text-sm">
+                      Users who requested to join your team
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={fetchJoinRequests}
+                    disabled={isLoadingRequests}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoadingRequests ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {isLoadingRequests ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : joinRequests.length > 0 ? (
+                  <div className="space-y-3">
+                    {joinRequests.map((request) => (
+                      <div
+                        key={request.id}
+                        className={`p-3 sm:p-4 border rounded-lg ${
+                          request.status === 'PENDING'
+                            ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
+                            : 'bg-muted/30'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Avatar className="w-10 h-10 sm:w-12 sm:h-12 shrink-0">
+                            <AvatarImage src={request.user?.avatar} />
+                            <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white text-sm">
+                              {request.user?.username?.substring(0, 2).toUpperCase() || 'U'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2 mb-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-sm sm:text-base truncate">
+                                  {request.user?.username || 'Unknown User'}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {request.user?.email}
+                                </p>
+                                {request.user?.gameName && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    Game: {request.user.gameName}
+                                    {request.user.gameId && ` (${request.user.gameId})`}
+                                  </p>
+                                )}
+                              </div>
+                              <Badge
+                                variant={
+                                  request.status === 'PENDING'
+                                    ? 'default'
+                                    : request.status === 'APPROVED'
+                                    ? 'secondary'
+                                    : 'destructive'
+                                }
+                                className="text-xs shrink-0"
+                              >
+                                {request.status}
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-3">
+                              Requested {new Date(request.createdAt).toLocaleDateString()} at{' '}
+                              {new Date(request.createdAt).toLocaleTimeString()}
+                            </p>
+                            {request.status === 'PENDING' && (
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <Button
+                                  size="sm"
+                                  className="flex-1 text-xs sm:text-sm bg-green-600 hover:bg-green-700"
+                                  onClick={() => handleJoinRequestAction(request.id, 'approve')}
+                                >
+                                  <Check className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                                  Approve
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="flex-1 text-xs sm:text-sm border-red-600 text-red-600 hover:bg-red-50"
+                                  onClick={() => handleJoinRequestAction(request.id, 'reject')}
+                                >
+                                  <XCircle className="mr-1 h-3 w-3 sm:h-4 sm:w-4" />
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Users className="h-12 w-12 mx-auto text-muted-foreground opacity-50 mb-3" />
+                    <p className="text-sm text-muted-foreground">No join requests yet</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Users can request to join using your team code or QR code
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         )}
       </Tabs>
@@ -1487,6 +1637,165 @@ export default function TeamDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Join Requests Dialog */}
+      <Dialog open={showRequestsDialog} onOpenChange={setShowRequestsDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              Join Requests
+              {joinRequests.filter(r => r.status === 'PENDING').length > 0 && (
+                <Badge variant="destructive" className="text-xs">
+                  {joinRequests.filter(r => r.status === 'PENDING').length} Pending
+                </Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              Users who requested to join your team
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto pr-2">
+            {isLoadingRequests ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : joinRequests.length > 0 ? (
+              <div className="space-y-3 py-4">
+                {joinRequests.map((request) => (
+                  <div
+                    key={request.id}
+                    className={`p-4 border rounded-lg transition-all ${
+                      request.status === 'PENDING'
+                        ? 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
+                        : 'bg-muted/30'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <Avatar className="w-12 h-12 shrink-0">
+                        <AvatarImage src={request.user?.avatar} />
+                        <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                          {request.user?.username?.substring(0, 2).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-base truncate">
+                              {request.user?.username || 'Unknown User'}
+                            </p>
+                            <p className="text-sm text-muted-foreground truncate">
+                              {request.user?.email}
+                            </p>
+                            {request.user?.gameName && (
+                              <p className="text-sm text-muted-foreground mt-1">
+                                🎮 {request.user.gameName}
+                                {request.user.gameId && ` (${request.user.gameId})`}
+                              </p>
+                            )}
+                          </div>
+                          <Badge
+                            variant={
+                              request.status === 'PENDING'
+                                ? 'default'
+                                : request.status === 'APPROVED'
+                                ? 'secondary'
+                                : 'destructive'
+                            }
+                            className="text-xs shrink-0"
+                          >
+                            {request.status}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          📅 Requested on {new Date(request.createdAt).toLocaleDateString()} at{' '}
+                          {new Date(request.createdAt).toLocaleTimeString()}
+                        </p>
+                        {request.status === 'PENDING' && (
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              className="flex-1 bg-green-600 hover:bg-green-700"
+                              onClick={() => {
+                                handleJoinRequestAction(request.id, 'approve');
+                              }}
+                            >
+                              <Check className="mr-2 h-4 w-4" />
+                              Approve
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 border-red-600 text-red-600 hover:bg-red-50"
+                              onClick={() => {
+                                handleJoinRequestAction(request.id, 'reject');
+                              }}
+                            >
+                              <XCircle className="mr-2 h-4 w-4" />
+                              Reject
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <Users className="h-16 w-16 mx-auto text-muted-foreground opacity-50 mb-4" />
+                <p className="text-lg font-medium text-muted-foreground mb-2">No Join Requests</p>
+                <p className="text-sm text-muted-foreground">
+                  Users can request to join using your team code or QR code
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-shrink-0 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setShowRequestsDialog(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite Code Dialog */}
+      <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite Players</DialogTitle>
+            <DialogDescription>
+              Share this code with players to join your team
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Invite Code</Label>
+              <div className="flex gap-2">
+                <Input value={`TEAM-${teamId}`} readOnly />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={copyInviteCode}
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Players can use this code to request joining your team
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Request Money Dialog */}
       <Dialog open={isRequestMoneyOpen} onOpenChange={setIsRequestMoneyOpen}>

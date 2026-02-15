@@ -49,6 +49,8 @@ export interface AdminTransaction {
     id: string;
     username: string;
     email: string;
+    avatar?: string;
+    balance: number;
   };
 }
 

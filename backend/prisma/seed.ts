@@ -7,9 +7,9 @@ async function main() {
   console.log('🌱 Starting database seed...');
 
   // Create admin user
-  const adminEmail = 'admin@example.com';
-  const adminUsername = 'admin';
-  const adminPassword = 'admin123';
+  const adminEmail = 'hello@ganeshsahu.com.np';
+  const adminUsername = 'ganeshsahu';
+  const adminPassword = 'G@nesh98';
 
   // Check if admin already exists
   const existingAdmin = await prisma.user.findFirst({
@@ -45,7 +45,7 @@ async function main() {
         email: adminEmail,
         username: adminUsername,
         password: hashedPassword,
-        fullName: 'Admin User',
+        fullName: 'Ganesh Sahu',
         role: 'ADMIN',
         isVerified: true,
         status: 'ACTIVE'
@@ -61,8 +61,8 @@ async function main() {
 
   console.log('\n🎉 Seed completed!');
   console.log('\n📝 Admin Login Credentials:');
-  console.log('   Email: admin@example.com');
-  console.log('   Password: admin123');
+  console.log('   Email: hello@ganeshsahu.com.np');
+  console.log('   Password: G@nesh98');
   console.log('\n🌐 Login at: http://localhost:3000/admin/login');
 }
 

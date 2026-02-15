@@ -21,6 +21,7 @@ import notificationRoutes from './routes/notification.routes';
 import customRoomsRoutes from './routes/custom-rooms.routes';
 import friendRoutes from './routes/friend.routes';
 import messageRoutes from './routes/message.routes';
+import transactionReportRoutes from './routes/transaction-report.routes';
 
 dotenv.config();
 
@@ -73,6 +74,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/custom-rooms', customRoomsRoutes);
 app.use('/api/friends', friendRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/transaction-reports', transactionReportRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
